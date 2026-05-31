@@ -549,6 +549,14 @@
     box-shadow: 0 0 0 2px rgba(245,197,24,0.15);
   }
 
+  .trans-input.short-input {
+    min-width: 120px;
+  }
+  .trans-input.short-input::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
   /* New badge */
   .new-tag {
     display: inline-block;
@@ -602,6 +610,17 @@
     background: var(--accent-glow);
     border: 1px solid var(--border-accent);
     color: var(--accent);
+  }
+
+  .alert-warn {
+    background: rgba(245,197,24,0.1);
+    border: 1px solid rgba(245,197,24,0.35);
+    color: #f5c518;
+  }
+
+  #errlog-btn.has-errors {
+    border-color: rgba(255,77,109,0.5);
+    color: #ff8fa3;
   }
 
   .empty-state {
@@ -779,6 +798,11 @@
         <button class="btn btn-primary" onclick="runParse()">
           <span>⚡</span> <span data-i18n="btn_run">解析して翻訳開始</span>
         </button>
+        <button class="btn btn-secondary" id="stop-btn" onclick="requestCancel()" style="display:none;color:var(--error);border-color:rgba(255,77,109,0.3);">
+          <span>⏹</span> <span data-i18n="btn_stop">停止</span>
+        </button>
+        <button class="btn btn-secondary" onclick="document.getElementById('lnc-import').click()" data-i18n="btn_importlnc">.lncを読み込み</button>
+        <input type="file" id="lnc-import" accept=".lnc,.txt,text/plain" style="display:none;" onchange="importLnc(event)">
         <button class="btn btn-secondary" onclick="clearAll()" data-i18n="btn_clear">クリア</button>
       </div>
 
@@ -851,8 +875,11 @@
         <button class="btn btn-secondary" onclick="downloadLnc()">
           <span>💾</span> <span data-i18n="btn_savelnc">.lncファイルで保存</span>
         </button>
+        <button class="btn btn-secondary" id="errlog-btn" onclick="downloadErrorLog()" style="display:none;margin-left:auto;font-size:12px;">
+          <span>🐞</span> <span class="errlog-label">エラーログ</span>
+        </button>
       </div>
-      <textarea class="output-textarea" id="output" placeholder='; ここに .lnc コードが生成されます&#10;; 例: "CLUB_LONG_NAME_CHANGE" 539859 "KE ウェルヴィク"' oninput="updateOutputInfo()"></textarea>
+      <textarea class="output-textarea" id="output" placeholder='; ここに .lnc コードが生成されます&#10;; 例:&#10;; "CLUB_LONG_NAME_CHANGE" 680 "マンチェスター・ユナイテッド"&#10;; "CLUB_SHORT_NAME_CHANGE" 680 "マンU"' oninput="updateOutputInfo()"></textarea>
       <div class="hint" id="output-info" style="margin-top:8px;" data-i18n="output_info">この欄は直接編集できます。修正してからコピー／保存してください。</div>
     </div>
   </div>
@@ -899,7 +926,7 @@ const I18N = {
     btn_gen: ".lncコード生成", btn_copy: "クリップボードにコピー", btn_savelnc: ".lncファイルで保存",
     output_info: "この欄は直接編集できます。修正してからコピー／保存してください。",
     // テーブルヘッダー
-    th_id: "ID", th_prefix: "プレフィックス", th_name: "原語クラブ名", th_trans: "日本語翻訳（編集可）",
+    th_id: "ID", th_prefix: "プレフィックス", th_name: "原語クラブ名", th_trans: "日本語翻訳（編集可）", th_short: "SHORT名（編集可）", short_ph: "空欄=LONGと同じ",
     btn_savedict: "💾 手動編集をユーザー辞書に保存", btn_resetdict: "🗑 ユーザー辞書をリセット",
     new_tag: "NEW",
     // インストール
@@ -938,6 +965,24 @@ const I18N = {
     msg_copy_ok: "コピー完了！",
     msg_copy_fail: "クリップボードへのコピーに失敗しました。手動でコピーしてください。",
     msg_lnc_saved: "club_names.lnc を保存しました。",
+    btn_errlog: (n) => `エラーログ (${n})`,
+    errlog_empty: "記録されたエラーはありません。",
+    errlog_saved: (n) => `エラーログ（${n}件）を fm-lnc-gen-error.log に保存しました。`,
+    msg_uncaught: "エラーが発生しました",
+    msg_uncaught_full: (m) => `予期しないエラーが発生しました: ${m}　「🐞 エラーログ」から詳細を保存できます。`,
+    warn_invalid: (n, sample) => `${n} 行を読み取れませんでした（末尾の数値ID無し等）。例 ${sample}`,
+    warn_dupids: (n, list) => `${n} 件のIDが重複しています: ${list}`,
+    warn_nokey_partial: (n) => `AI翻訳が必要な行が ${n} 件ありますが、APIキーが未入力です。辞書ヒット分のみ表示します（残りは手入力できます）。`,
+    warn_cancelled: (done, total) => `翻訳を中断しました（${done}/${total} 件完了）。途中までの結果を表示しています。`,
+    warn_sanitized: (n) => `${n} 件の名前から、.lncを壊す文字（ダブルクォート等）を自動で除去しました。`,
+    btn_stop: "停止",
+    btn_importlnc: ".lncを読み込み",
+    btn_savealldict: "全件を辞書に追加",
+    msg_savealldict: (n) => `${n} 件を辞書に追加しました。`,
+    msg_restored: (n, mins) => `前回の作業を復元しました（${n} 件・約${mins}分前）。新しく始めるには「クリア」。`,
+    msg_lnc_none: ".lnc から CLUB_LONG / SHORT の行が見つかりませんでした。",
+    msg_lnc_loaded: (n) => `.lnc を読み込みました（${n} クラブ）。`,
+    filter_attn: (n) => `要対応のみ表示（${n} 件）`,
     output_info_count: (l,c) => `この欄は直接編集できます。 — ${l} 行 / ${c} 文字`,
   },
   en: {
@@ -974,7 +1019,7 @@ const I18N = {
     step3_desc: "Copy the generated .lnc format and apply it to Football Manager",
     btn_gen: "Generate .lnc code", btn_copy: "Copy to clipboard", btn_savelnc: "Save as .lnc file",
     output_info: "This field is editable. Edit before copying / saving.",
-    th_id: "ID", th_prefix: "Prefix", th_name: "Original name", th_trans: "Translation (editable)",
+    th_id: "ID", th_prefix: "Prefix", th_name: "Original name", th_trans: "Translation (editable)", th_short: "Short name (editable)", short_ph: "blank = same as LONG",
     btn_savedict: "💾 Save edits to user dictionary", btn_resetdict: "🗑 Reset user dictionary",
     new_tag: "NEW",
     install_text: "You can install this tool as an app.", install_btn: "Install",
@@ -1010,6 +1055,24 @@ const I18N = {
     msg_copy_ok: "Copied!",
     msg_copy_fail: "Failed to copy to clipboard. Please copy manually.",
     msg_lnc_saved: "Saved club_names.lnc.",
+    btn_errlog: (n) => `Error log (${n})`,
+    errlog_empty: "No errors have been recorded.",
+    errlog_saved: (n) => `Saved error log (${n} entries) to fm-lnc-gen-error.log.`,
+    msg_uncaught: "An error occurred",
+    msg_uncaught_full: (m) => `An unexpected error occurred: ${m}  You can save details from the "🐞 Error log" button.`,
+    warn_invalid: (n, sample) => `Could not read ${n} line(s) (e.g. no trailing numeric ID). Sample ${sample}`,
+    warn_dupids: (n, list) => `${n} duplicate ID(s): ${list}`,
+    warn_nokey_partial: (n) => `${n} line(s) need AI translation but no API key is set. Showing dictionary hits only (you can fill the rest manually).`,
+    warn_cancelled: (done, total) => `Translation cancelled (${done}/${total} done). Showing partial results.`,
+    warn_sanitized: (n) => `Removed characters that break .lnc (e.g. double quotes) from ${n} name(s).`,
+    btn_stop: "Stop",
+    btn_importlnc: "Load .lnc",
+    btn_savealldict: "Add all to dictionary",
+    msg_savealldict: (n) => `Added ${n} entries to the dictionary.`,
+    msg_restored: (n, mins) => `Restored your previous work (${n} rows, ~${mins} min ago). Use "Clear" to start fresh.`,
+    msg_lnc_none: "No CLUB_LONG / SHORT lines found in the .lnc file.",
+    msg_lnc_loaded: (n) => `Loaded .lnc (${n} clubs).`,
+    filter_attn: (n) => `Show needs-attention only (${n})`,
     output_info_count: (l,c) => `This field is editable. — ${l} lines / ${c} chars`,
   },
   zh: {
@@ -1046,7 +1109,7 @@ const I18N = {
     step3_desc: "复制生成的 .lnc 格式并应用到 Football Manager",
     btn_gen: "生成 .lnc 代码", btn_copy: "复制到剪贴板", btn_savelnc: "保存为 .lnc 文件",
     output_info: "此栏可直接编辑。编辑后再复制／保存。",
-    th_id: "ID", th_prefix: "前缀", th_name: "原始名称", th_trans: "翻译（可编辑）",
+    th_id: "ID", th_prefix: "前缀", th_name: "原始名称", th_trans: "翻译（可编辑）", th_short: "简称（可编辑）", short_ph: "留空=与LONG相同",
     btn_savedict: "💾 将编辑保存到用户词典", btn_resetdict: "🗑 重置用户词典",
     new_tag: "新",
     install_text: "你可以将此工具安装为应用。", install_btn: "安装",
@@ -1118,7 +1181,7 @@ const I18N = {
     step3_desc: "생성된 .lnc 형식을 복사하여 Football Manager에 적용하세요",
     btn_gen: ".lnc 코드 생성", btn_copy: "클립보드에 복사", btn_savelnc: ".lnc 파일로 저장",
     output_info: "이 칸은 직접 편집할 수 있습니다. 편집 후 복사／저장하세요.",
-    th_id: "ID", th_prefix: "접두사", th_name: "원어 이름", th_trans: "번역 (편집 가능)",
+    th_id: "ID", th_prefix: "접두사", th_name: "원어 이름", th_trans: "번역 (편집 가능)", th_short: "짧은 이름 (편집 가능)", short_ph: "비우면 LONG과 동일",
     btn_savedict: "💾 편집을 사용자 사전에 저장", btn_resetdict: "🗑 사용자 사전 초기화",
     new_tag: "신규",
     install_text: "이 도구를 앱으로 설치할 수 있습니다.", install_btn: "설치",
@@ -1190,7 +1253,7 @@ const I18N = {
     step3_desc: "Den erzeugten .lnc-Code kopieren und in Football Manager anwenden",
     btn_gen: ".lnc-Code erzeugen", btn_copy: "In Zwischenablage kopieren", btn_savelnc: "Als .lnc-Datei speichern",
     output_info: "Dieses Feld ist bearbeitbar. Vor dem Kopieren/Speichern bearbeiten.",
-    th_id: "ID", th_prefix: "Präfix", th_name: "Originalname", th_trans: "Übersetzung (bearbeitbar)",
+    th_id: "ID", th_prefix: "Präfix", th_name: "Originalname", th_trans: "Übersetzung (bearbeitbar)", th_short: "Kurzname (bearbeitbar)", short_ph: "leer = wie LONG",
     btn_savedict: "💾 Änderungen im Wörterbuch speichern", btn_resetdict: "🗑 Benutzerwörterbuch zurücksetzen",
     new_tag: "NEU",
     install_text: "Du kannst dieses Tool als App installieren.", install_btn: "Installieren",
@@ -1262,7 +1325,7 @@ const I18N = {
     step3_desc: "Copiez le format .lnc généré et appliquez-le à Football Manager",
     btn_gen: "Générer le code .lnc", btn_copy: "Copier dans le presse-papiers", btn_savelnc: "Enregistrer en fichier .lnc",
     output_info: "Ce champ est modifiable. Modifiez avant de copier/enregistrer.",
-    th_id: "ID", th_prefix: "Préfixe", th_name: "Nom d'origine", th_trans: "Traduction (modifiable)",
+    th_id: "ID", th_prefix: "Préfixe", th_name: "Nom d'origine", th_trans: "Traduction (modifiable)", th_short: "Nom court (modifiable)", short_ph: "vide = comme LONG",
     btn_savedict: "💾 Enregistrer les modifs au dictionnaire", btn_resetdict: "🗑 Réinitialiser le dictionnaire",
     new_tag: "NOUV",
     install_text: "Vous pouvez installer cet outil comme une application.", install_btn: "Installer",
@@ -1334,7 +1397,7 @@ const I18N = {
     step3_desc: "Formam .lnc generatam copia et ad Football Manager applica",
     btn_gen: "Codicem .lnc generare", btn_copy: "In tabulam copiare", btn_savelnc: "Ut .lnc servare",
     output_info: "Hic campus emendari potest. Emenda antequam copies/serves.",
-    th_id: "ID", th_prefix: "Praefixum", th_name: "Nomen originale", th_trans: "Translatio (emendabilis)",
+    th_id: "ID", th_prefix: "Praefixum", th_name: "Nomen originale", th_trans: "Translatio (emendabilis)", th_short: "Nomen breve (emendabile)", short_ph: "vacuum = idem ac LONG",
     btn_savedict: "💾 Emendata in glossario servare", btn_resetdict: "🗑 Glossarium usoris renovare",
     new_tag: "NOVUM",
     install_text: "Hoc instrumentum ut applicationem instituere potes.", install_btn: "Instituere",
@@ -1406,7 +1469,7 @@ const I18N = {
     step3_desc: "העתיקו את פורמט ה-‎.lnc שנוצר והחילו אותו ב-Football Manager",
     btn_gen: "צור קוד ‎.lnc", btn_copy: "העתק ללוח", btn_savelnc: "שמור כקובץ ‎.lnc",
     output_info: "השדה ניתן לעריכה. ערכו לפני העתקה/שמירה.",
-    th_id: "מזהה", th_prefix: "קידומת", th_name: "שם מקורי", th_trans: "תרגום (ניתן לעריכה)",
+    th_id: "מזהה", th_prefix: "קידומת", th_name: "שם מקורי", th_trans: "תרגום (ניתן לעריכה)", th_short: "שם קצר (ניתן לעריכה)", short_ph: "ריק = זהה ל-LONG",
     btn_savedict: "💾 שמור עריכות למילון", btn_resetdict: "🗑 אפס מילון משתמש",
     new_tag: "חדש",
     install_text: "אפשר להתקין כלי זה כאפליקציה.", install_btn: "התקן",
@@ -1466,6 +1529,163 @@ function t(key, ...args) {
   return typeof v === 'function' ? v(...args) : v;
 }
 
+// ============================
+// エラーログ
+// ============================
+const ERROR_LOG = [];
+
+function logError(context, err) {
+  const entry = {
+    time: new Date().toISOString(),
+    context: context || 'unknown',
+    message: (err && (err.message || err.reason?.message)) || String(err),
+    stack: (err && (err.stack || err.reason?.stack)) || ''
+  };
+  ERROR_LOG.push(entry);
+  try { console.error('[FM.LNC GEN]', context, err); } catch {}
+  updateErrLogBtn();
+  return entry;
+}
+
+// 例外を捕捉してログに残し、ユーザーに通知する非同期ラッパー
+async function guard(context, fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    logError(context, err);
+    try { setStatus('error', t('msg_uncaught')); } catch {}
+    try { showAlert('error', t('msg_uncaught_full', (err && err.message) || String(err))); } catch {}
+  }
+}
+
+function updateErrLogBtn() {
+  const btn = document.getElementById('errlog-btn');
+  if (!btn) return;
+  const n = ERROR_LOG.length;
+  const label = btn.querySelector('.errlog-label');
+  if (label) label.textContent = t('btn_errlog', n);
+  btn.style.display = '';
+  btn.classList.toggle('has-errors', n > 0);
+}
+
+function downloadErrorLog() {
+  if (ERROR_LOG.length === 0) {
+    showAlert('warn', t('errlog_empty'));
+    return;
+  }
+  const header = [
+    'FM.LNC GEN error log',
+    'generated: ' + new Date().toISOString(),
+    'userAgent: ' + navigator.userAgent,
+    'language: ' + LANG,
+    'entries: ' + ERROR_LOG.length,
+    '========================================='
+  ].join('\r\n');
+  const body = ERROR_LOG.map((e, i) =>
+    [`#${i + 1} [${e.time}] (${e.context})`, e.message, e.stack ? e.stack : '(no stack)']
+      .join('\r\n')
+  ).join('\r\n\r\n');
+  const text = header + '\r\n\r\n' + body + '\r\n';
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'fm-lnc-gen-error.log';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showAlert('success', t('errlog_saved', ERROR_LOG.length));
+}
+
+// 未捕捉のエラー・Promise拒否をログへ
+window.addEventListener('error', e => {
+  logError('window.onerror', e.error || e.message || e);
+});
+window.addEventListener('unhandledrejection', e => {
+  logError('unhandledrejection', e.reason || e);
+});
+
+// ============================
+// 翻訳の中断
+// ============================
+let cancelRequested = false;
+function requestCancel() { cancelRequested = true; }
+function setTranslating(on) {
+  const stop = document.getElementById('stop-btn');
+  if (stop) stop.style.display = on ? '' : 'none';
+}
+
+// ============================
+// セッション自動保存・復元
+// ============================
+const SESSION_KEY = 'fm_session_v1';
+let saveTimer = null;
+
+function saveSession() {
+  try {
+    const payload = {
+      v: 1,
+      savedAt: Date.now(),
+      raw: document.getElementById('raw-input')?.value || '',
+      output: document.getElementById('output')?.value || '',
+      tableData: tableData
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+  } catch (e) {
+    logError('saveSession', e);
+  }
+}
+
+// 編集のたびに少し待ってから保存（負荷軽減）
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveSession, 800);
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch {}
+}
+
+function restoreSession() {
+  let payload;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    payload = JSON.parse(raw);
+  } catch (e) {
+    logError('restoreSession:parse', e);
+    clearSession();
+    return;
+  }
+  // 形式チェック（壊れた・古いデータは無視）
+  if (!payload || payload.v !== 1 || !Array.isArray(payload.tableData) || payload.tableData.length === 0) return;
+  const ok = payload.tableData.every(d => d && typeof d === 'object' && 'id' in d && 'translated' in d);
+  if (!ok) { clearSession(); return; }
+
+  try {
+    tableData = payload.tableData;
+    const rawEl = document.getElementById('raw-input');
+    const outEl = document.getElementById('output');
+    if (rawEl && payload.raw) rawEl.value = payload.raw;
+    if (outEl && payload.output) outEl.value = payload.output;
+    renderTable();
+    updateOutputInfo();
+    const dict = tableData.filter(d => d.source === 'dict').length;
+    const user = tableData.filter(d => d.source === 'user').length;
+    const ai = tableData.filter(d => d.source === 'ai').length;
+    document.getElementById('stat-total').textContent = tableData.length;
+    document.getElementById('stat-dict').textContent = dict;
+    document.getElementById('stat-ai').textContent = ai;
+    document.getElementById('stat-user').textContent = user;
+    document.getElementById('stats-area').style.display = 'flex';
+    const mins = Math.round((Date.now() - (payload.savedAt || Date.now())) / 60000);
+    showAlert('success', t('msg_restored', tableData.length, mins));
+  } catch (e) {
+    logError('restoreSession:apply', e);
+  }
+}
+
 function setLang(lang) {
   if (!I18N[lang]) return;
   LANG = lang;
@@ -1475,7 +1695,7 @@ function setLang(lang) {
   // 静的テキストを差し替え
   document.querySelectorAll('[data-i18n]').forEach(el => {
     const key = el.getAttribute('data-i18n');
-    const val = I18N[lang][key];
+    const val = I18N[lang][key] ?? I18N.en[key];
     if (typeof val === 'string') el.textContent = val;
   });
   // 言語セレクターの選択状態
@@ -1484,6 +1704,7 @@ function setLang(lang) {
   // 動的な部分を更新
   updateDictCount();
   updateOutputInfo();
+  if (typeof ERROR_LOG !== 'undefined') updateErrLogBtn();
   if (typeof tableData !== 'undefined' && tableData.length) renderTable();
 }
 
@@ -1544,6 +1765,8 @@ function getApiKey() {
 window.addEventListener('DOMContentLoaded', () => {
   const saved = localStorage.getItem('fm_api_key');
   if (saved) document.getElementById('api-key').value = saved;
+  updateErrLogBtn();
+  restoreSession();
   const savedModel = localStorage.getItem('fm_model');
   if (savedModel) {
     const sel = document.getElementById('model-select');
@@ -1632,7 +1855,12 @@ function lookupWord(word, userDict) {
 }
 
 function lookupPhrase(words, userDict) {
-  // まず全単語を個別に辞書チェック
+  // フレーズ全体の登録を最優先（複数語の名前も辞書ヒットできるように）
+  const phraseKey = words.join(' ').toLowerCase();
+  if (userDict && userDict[phraseKey]) {
+    return { text: userDict[phraseKey], source: 'user', missing: [] };
+  }
+  // 次に全単語を個別に辞書チェック
   const results = words.map(w => lookupWord(w, userDict));
   const allFound = results.every(r => r !== null);
   if (allFound) {
@@ -1786,6 +2014,7 @@ async function extractFromImages() {
     setStatus('done', t('msg_extract_done', lineCount));
     showAlert('success', t('msg_extract_ok', lineCount));
   } catch (e) {
+    logError('extractFromImages', e);
     setStatus('error', t('msg_extracterr', e.message));
     showAlert('error', t('msg_extracterr', e.message));
   }
@@ -1853,30 +2082,55 @@ async function translateWithGemini(phrase, apiKey) {
 let tableData = [];
 
 async function runParse() {
+  return guard('runParse', _runParse);
+}
+async function _runParse() {
   const raw = document.getElementById('raw-input').value.trim();
   if (!raw) { showAlert('error', t('msg_need_data')); return; }
-
-  const apiKey = getApiKey();
-  if (!apiKey) { showAlert('error', t('msg_need_key')); return; }
 
   clearAlert();
   tableData = [];
 
-  const lines = raw.split('\n').filter(l => l.trim());
-  const parsed = lines.map(parseLine).filter(Boolean);
+  // 行ごとに解析。ID が取れない行・空行は不正行として記録
+  const rawLines = raw.split('\n');
+  const parsed = [];
+  const invalidLines = [];
+  rawLines.forEach((line, i) => {
+    if (!line.trim()) return;
+    const p = parseLine(line);
+    if (p) parsed.push(p);
+    else invalidLines.push({ no: i + 1, text: line.trim() });
+  });
 
   if (!parsed.length) {
     showAlert('error', t('msg_no_valid'));
     return;
   }
 
+  // ID 重複の検出
+  const idCount = {};
+  parsed.forEach(p => { idCount[p.id] = (idCount[p.id] || 0) + 1; });
+  const dupIds = Object.keys(idCount).filter(id => idCount[id] > 1);
+
+  // 警告（不正行・重複ID）をまとめて表示
+  const warnings = [];
+  if (invalidLines.length) {
+    const sample = invalidLines.slice(0, 3).map(v => `L${v.no}: ${v.text}`).join(' / ');
+    warnings.push(t('warn_invalid', invalidLines.length, sample));
+  }
+  if (dupIds.length) {
+    warnings.push(t('warn_dupids', dupIds.length, dupIds.slice(0, 8).join(', ')));
+  }
+  if (warnings.length) showAlert('warn', warnings.join('  ｜  '));
+
   setStatus('active', t('msg_processing', parsed.length));
 
   const userDict = getUserDict();
   let statDict = 0, statAi = 0, statUser = 0;
 
-  // AIに一括送信するキューを作成
-  const aiQueue = []; // { index, phrase }
+  // AIに送るキュー。同じ名前は1回だけ翻訳して使い回す（重複排除）
+  const aiQueue = []; // { phrase, indices: [] }
+  const queueByPhrase = {};
 
   for (let i = 0; i < parsed.length; i++) {
     const p = parsed[i];
@@ -1886,46 +2140,80 @@ async function runParse() {
       tableData.push({
         ...p,
         translated: lookup.text,
+        short: '',
         isNew: false,
         source: lookup.source
       });
       if (lookup.source === 'user') statUser++;
       else statDict++;
     } else {
-      // AIに投げる（tableData上のインデックスを記録）
       const tableDataIndex = tableData.length;
       tableData.push({
         ...p,
         translated: '',
+        short: '',
         isNew: true,
         source: 'ai'
       });
-      aiQueue.push({ tableDataIndex, phrase: p.originalName });
+      const key = p.originalName.toLowerCase();
+      if (queueByPhrase[key]) {
+        queueByPhrase[key].indices.push(tableDataIndex);
+      } else {
+        const entry = { phrase: p.originalName, indices: [tableDataIndex] };
+        queueByPhrase[key] = entry;
+        aiQueue.push(entry);
+      }
+    }
+  }
+
+  // AI翻訳が必要な行があるときだけAPIキーを要求
+  let apiKey = '';
+  if (aiQueue.length > 0) {
+    apiKey = getApiKey();
+    if (!apiKey) {
+      // キーが無くても辞書ヒット分は表示する（AI行は空欄のまま手入力可）
+      showAlert('warn', t('warn_nokey_partial', aiQueue.length));
+      finishParse(statDict, statAi, statUser);
+      return;
     }
   }
 
   // AI一括翻訳
   if (aiQueue.length > 0) {
+    cancelRequested = false;
+    setTranslating(true);
     setStatus('active', t('msg_translating', 0, aiQueue.length, ''));
     for (let qi = 0; qi < aiQueue.length; qi++) {
+      if (cancelRequested) {
+        showAlert('warn', t('warn_cancelled', qi, aiQueue.length));
+        break;
+      }
       const q = aiQueue[qi];
       setStatus('active', t('msg_translating', qi + 1, aiQueue.length, q.phrase));
       try {
         const result = await translateWithGemini(q.phrase, apiKey);
-        tableData[q.tableDataIndex].translated = result;
-        statAi++;
+        q.indices.forEach(idx => { tableData[idx].translated = result; });
+        statAi += q.indices.length;
       } catch (e) {
-        tableData[q.tableDataIndex].translated = t('msg_transfail');
-        tableData[q.tableDataIndex].error = e.message;
+        logError('translateWithGemini:' + q.phrase, e);
+        q.indices.forEach(idx => {
+          tableData[idx].translated = t('msg_transfail');
+          tableData[idx].error = e.message;
+        });
         showAlert('error', t('msg_transerr', q.phrase, e.message));
       }
       // レート制限対策（設定された間隔を待つ）
       const gapMs = parseInt(document.getElementById('rate-gap')?.value || '12000', 10);
-      if (qi < aiQueue.length - 1) await sleep(gapMs);
+      if (qi < aiQueue.length - 1 && !cancelRequested) await sleep(gapMs);
     }
+    setTranslating(false);
   }
 
-  // 統計更新
+  finishParse(statDict, statAi, statUser);
+}
+
+// 統計更新・描画・保存をまとめる
+function finishParse(statDict, statAi, statUser) {
   document.getElementById('stat-total').textContent = tableData.length;
   document.getElementById('stat-dict').textContent = statDict;
   document.getElementById('stat-ai').textContent = statAi;
@@ -1933,6 +2221,7 @@ async function runParse() {
   document.getElementById('stats-area').style.display = 'flex';
 
   renderTable();
+  saveSession();
   setStatus('done', t('msg_done', tableData.length, statDict, statAi, statUser));
 }
 
@@ -1948,7 +2237,11 @@ function renderTable() {
     return;
   }
 
+  const needsAttention = d => !((d.translated || '').trim()) || d.error || d.translated === t('msg_transfail');
+  const attnCount = tableData.filter(needsAttention).length;
+
   let rows = tableData.map((d, i) => {
+    if (filterAttention && !needsAttention(d)) return '';
     const isNew = d.isNew;
     const newTag = isNew ? `<span class="new-tag">${t('new_tag')}</span>` : '';
     const inputClass = isNew ? 'trans-input is-new' : 'trans-input';
@@ -1958,10 +2251,17 @@ function renderTable() {
       <td class="prefix-cell">${d.prefix || '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="name-cell">${escHtml(d.originalName)}${newTag}</td>
       <td><input class="${inputClass}" ${errTitle} value="${escHtml(d.translated)}" data-idx="${i}" onchange="onTransEdit(this, ${i})" oninput="onTransEdit(this, ${i})"></td>
+      <td><input class="trans-input short-input" value="${escHtml(d.short || '')}" placeholder="${t('short_ph')}" data-idx="${i}" onchange="onShortEdit(this, ${i})" oninput="onShortEdit(this, ${i})"></td>
     </tr>`;
   }).join('');
 
   area.innerHTML = `
+    <div class="btn-row" style="margin-bottom:10px;align-items:center;">
+      <label style="font-size:12px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" ${filterAttention ? 'checked' : ''} onchange="toggleFilter(this.checked)" style="cursor:pointer;">
+        ${t('filter_attn', attnCount)}
+      </label>
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -1970,6 +2270,7 @@ function renderTable() {
             <th>${t('th_prefix')}</th>
             <th>${t('th_name')}</th>
             <th>${t('th_trans')}</th>
+            <th>${t('th_short')}</th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -1978,6 +2279,9 @@ function renderTable() {
     <div class="btn-row" style="margin-top:14px;">
       <button class="btn btn-secondary" onclick="saveUserDictFromTable()" style="font-size:12px;">
         ${t('btn_savedict')}
+      </button>
+      <button class="btn btn-secondary" onclick="saveAllToDict()" style="font-size:12px;">
+        ${t('btn_savealldict')}
       </button>
       <button class="btn btn-secondary" onclick="downloadUserDict()" style="font-size:12px;">
         ${t('btn_dictdl')}
@@ -1993,9 +2297,22 @@ function renderTable() {
   `;
 }
 
+let filterAttention = false;
+function toggleFilter(on) {
+  filterAttention = !!on;
+  renderTable();
+}
+
 function onTransEdit(input, idx) {
   tableData[idx].translated = input.value;
   tableData[idx].edited = true;
+  scheduleSave();
+}
+
+function onShortEdit(input, idx) {
+  tableData[idx].short = input.value;
+  tableData[idx].edited = true;
+  scheduleSave();
 }
 
 function saveUserDictFromTable() {
@@ -2011,6 +2328,84 @@ function saveUserDictFromTable() {
   });
   saveUserDict(userDict);
   showAlert('success', t('msg_savedict', count));
+}
+
+// 確定済みの訳をまとめて辞書へ（編集の有無を問わず、有効な翻訳すべて）
+function saveAllToDict() {
+  const userDict = getUserDict();
+  let count = 0;
+  tableData.forEach(d => {
+    const trans = (d.translated || '').trim();
+    if (!trans || trans === t('msg_transfail') || d.error) return;
+    if (!d.originalName) return;
+    userDict[d.originalName.toLowerCase()] = trans;
+    count++;
+  });
+  saveUserDict(userDict);
+  showAlert('success', t('msg_savealldict', count));
+}
+
+// 既存の .lnc を読み込んでテーブルに展開（往復編集）
+function importLnc(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => guardSync('importLnc', () => {
+    const text = String(e.target.result || '');
+    const lines = text.split(/\r?\n/);
+    const byId = {}; // id -> { long, short }
+    const order = [];
+    const re = /^"CLUB_(LONG|SHORT)_NAME_CHANGE"\s+(\d+)\s+"(.*)"\s*$/;
+    lines.forEach(line => {
+      const s = line.trim();
+      if (!s || s.startsWith(';')) return;
+      const m = s.match(re);
+      if (!m) return;
+      const kind = m[1], id = m[2], val = m[3];
+      if (!byId[id]) { byId[id] = { long: '', short: '' }; order.push(id); }
+      if (kind === 'LONG') byId[id].long = val;
+      else byId[id].short = val;
+    });
+    if (order.length === 0) {
+      showAlert('error', t('msg_lnc_none'));
+      return;
+    }
+    tableData = order.map(id => {
+      const { long, short } = byId[id];
+      const name = long || short || '';
+      return {
+        id,
+        prefix: '',
+        originalName: name,
+        nameWords: name ? name.split(/\s+/) : [],
+        translated: name,
+        short: (short && short !== long) ? short : '',
+        isNew: false,
+        source: 'import'
+      };
+    });
+    document.getElementById('stat-total').textContent = tableData.length;
+    document.getElementById('stat-dict').textContent = 0;
+    document.getElementById('stat-ai').textContent = 0;
+    document.getElementById('stat-user').textContent = 0;
+    document.getElementById('stats-area').style.display = 'flex';
+    renderTable();
+    saveSession();
+    setStatus('done', t('msg_lnc_loaded', tableData.length));
+    showAlert('success', t('msg_lnc_loaded', tableData.length));
+  });
+  reader.onerror = () => logError('importLnc:read', reader.error || new Error('read failed'));
+  reader.readAsText(file);
+}
+
+// 同期処理用のエラーガード
+function guardSync(context, fn) {
+  try { return fn(); }
+  catch (err) {
+    logError(context, err);
+    try { showAlert('error', t('msg_uncaught_full', (err && err.message) || String(err))); } catch {}
+  }
 }
 
 function clearUserDict() {
@@ -2098,6 +2493,9 @@ function importUserDict(event) {
 // .lnc 生成
 // ============================
 function generateLnc() {
+  return guard('generateLnc', _generateLnc);
+}
+function _generateLnc() {
   if (!tableData.length) {
     showAlert('error', t('msg_parse_first'));
     return;
@@ -2108,16 +2506,38 @@ function generateLnc() {
   lines.push('; Generated by FM.LNC GEN');
   lines.push('');
 
+  let dropped = 0;
   tableData.forEach(d => {
-    const trans = d.translated.trim();
+    const trans = sanitizeName(d.translated);
     if (!trans) return;
-    const label = d.prefix ? `${d.prefix} ${trans}` : trans;
-    lines.push(`"CLUB_LONG_NAME_CHANGE" ${d.id} "${label}"`);
-    lines.push(`"CLUB_SHORT_NAME_CHANGE" ${d.id} "${label}"`);
+    const prefix = sanitizeName(d.prefix);
+    const longLabel = prefix ? `${prefix} ${trans}` : trans;
+    const shortRaw = sanitizeName(d.short);
+    const shortLabel = shortRaw ? shortRaw : longLabel;
+    if (/["\r\n\t]/.test(`${d.translated || ''}${d.short || ''}${d.prefix || ''}`)) dropped++;
+    lines.push(`"CLUB_LONG_NAME_CHANGE" ${d.id} "${longLabel}"`);
+    lines.push(`"CLUB_SHORT_NAME_CHANGE" ${d.id} "${shortLabel}"`);
   });
 
+  // 画面表示は LF（textarea が正規化するため）。保存・コピー時に CRLF へ変換する
   document.getElementById('output').value = lines.join('\n');
   updateOutputInfo();
+  saveSession();
+  if (dropped > 0) showAlert('warn', t('warn_sanitized', dropped));
+}
+
+// .lnc 用に名前を安全化：区切り記号のダブルクォートを除去し、制御文字・改行を空白に
+function sanitizeName(s) {
+  return String(s || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/"/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// FM の .lnc は CRLF 改行が標準なので、書き出し時に変換する
+function toCRLF(text) {
+  return text.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
 }
 
 // 出力欄の行数・文字数を表示
@@ -2136,7 +2556,7 @@ function updateOutputInfo() {
 function downloadLnc() {
   const text = document.getElementById('output').value;
   if (!text.trim()) { showAlert('error', t('msg_gen_first')); return; }
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob([toCRLF(text)], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -2152,7 +2572,7 @@ async function copyOutput() {
   const text = document.getElementById('output').value;
   if (!text) { showAlert('error', t('msg_gen_first')); return; }
   try {
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(toCRLF(text));
     const btn = document.getElementById('copy-btn');
     const orig = btn.innerHTML;
     btn.innerHTML = `<span>✅</span> ${t('msg_copy_ok')}`;
@@ -2175,8 +2595,8 @@ function setStatus(type, text) {
 
 function showAlert(type, msg) {
   const area = document.getElementById('alert-area');
-  const cls = type === 'error' ? 'alert-error' : 'alert-success';
-  const icon = type === 'error' ? '⚠' : '✓';
+  const cls = type === 'error' ? 'alert-error' : type === 'warn' ? 'alert-warn' : 'alert-success';
+  const icon = type === 'error' ? '⚠' : type === 'warn' ? '⚠' : '✓';
   area.innerHTML = `<div class="alert ${cls}"><span>${icon}</span><span>${escHtml(msg)}</span></div>`;
 }
 
@@ -2188,6 +2608,10 @@ function clearAll() {
   document.getElementById('raw-input').value = '';
   document.getElementById('output').value = '';
   tableData = [];
+  filterAttention = false;
+  cancelRequested = false;
+  setTranslating(false);
+  clearSession();
   clearImages();
   document.getElementById('table-area').innerHTML = `
     <div class="empty-state">
