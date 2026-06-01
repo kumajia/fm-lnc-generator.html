@@ -739,23 +739,46 @@
     </div>
     <div class="step-body">
       <div class="field-group">
-        <label class="field-label" data-i18n="label_apikey">Gemini APIキー</label>
+        <label class="field-label" data-i18n="label_provider">APIプロバイダ</label>
+        <select id="provider-select" onchange="onProviderChange()">
+          <option value="gemini">Google Gemini（画像抽出も対応）</option>
+          <option value="groq">Groq（高速・制限ゆるめ／翻訳のみ）</option>
+        </select>
+        <div class="hint" data-i18n="hint_provider">※ Groq は速くて無料枠が広めですが、画像抽出（スクショ読み取り）は Gemini のみ対応です。</div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Gemini APIキー</label>
         <div class="input-wrap">
-          <input type="password" id="api-key" placeholder="AIzaSy..." autocomplete="off">
-          <button class="toggle-vis" onclick="toggleApiVis()" title="表示/非表示">👁</button>
+          <input type="password" id="api-key-gemini" placeholder="AIzaSy..." autocomplete="off">
+          <button class="toggle-vis" onclick="toggleApiVis('api-key-gemini')" title="表示/非表示">👁</button>
         </div>
-        <div class="hint" data-i18n="hint_apikey">※ Google AI Studio (aistudio.google.com) で無料取得できます。キーはブラウザのlocalStorageに保存されます。</div>
+        <div class="hint">※ Google AI Studio (aistudio.google.com) で無料取得。翻訳と画像抽出に使います。</div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">Groq APIキー <span style="color:var(--text-muted);font-weight:400;">（任意）</span></label>
+        <div class="input-wrap">
+          <input type="password" id="api-key-groq" placeholder="gsk_..." autocomplete="off">
+          <button class="toggle-vis" onclick="toggleApiVis('api-key-groq')" title="表示/非表示">👁</button>
+        </div>
+        <div class="hint">※ console.groq.com で無料取得（クレカ不要）。プロバイダで Groq を選んだときに使います。</div>
       </div>
 
       <div class="field-group">
         <label class="field-label" data-i18n="label_model">モデル選択</label>
         <select id="model-select">
-          <option value="gemini-2.5-flash">gemini-2.5-flash（推奨・無料枠あり）</option>
-          <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（高速・軽量）</option>
-          <option value="gemini-2.0-flash">gemini-2.0-flash</option>
-          <option value="gemini-1.5-flash">gemini-1.5-flash（旧モデル）</option>
+          <optgroup label="Gemini" id="optgroup-gemini">
+            <option value="gemini-2.5-flash">gemini-2.5-flash（推奨・無料枠あり）</option>
+            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite（高速・軽量・無料枠多め）</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro（高品質・無料枠少なめ）</option>
+          </optgroup>
+          <optgroup label="Groq" id="optgroup-groq" style="display:none;">
+            <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile（高品質）</option>
+            <option value="meta-llama/llama-4-scout-17b-16e-instruct">llama-4-scout（高速）</option>
+          </optgroup>
         </select>
-        <div class="hint" data-i18n="hint_model">※ 「quota / limit: 0」エラーが出る場合は別のモデルを選んでください。2.0-flashの無料枠が0になっているアカウントが多発しています。</div>
+        <div class="hint" data-i18n="hint_model">※ 「quota / limit: 0」エラーが出る場合は別のモデルを選んでください。</div>
       </div>
 
       <div class="field-group">
@@ -899,7 +922,7 @@
   </div>
 
   <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
-    FMlncGen <span id="app-version">v1.1.2</span>
+    FMlncGen <span id="app-version">v1.2.0</span>
   </div>
 
 </div>
@@ -974,6 +997,7 @@ const I18N = {
     msg_extract_done: (n) => `抽出完了！ ${n} 行を入力欄に追加しました。内容を確認して「解析して翻訳開始」へ。`,
     msg_extract_ok: (n) => `${n} 行のクラブデータを抽出しました。入力欄で内容を確認・修正してください。`,
     msg_extract_cancelled: "画像の抽出を中断しました。",
+    msg_extract_needs_gemini: "画像抽出には Gemini APIキーが必要です。Gemini APIキー欄に入力してください。",
     msg_img_pasted: "画像を貼り付けました。「画像から抽出」をクリックしてください。",
     msg_extracterr: (e) => `画像抽出エラー: ${e}`,
     msg_savedict: (n) => `${n} 件のワードをユーザー辞書に保存しました。次回は自動入力されます。`,
@@ -1073,6 +1097,7 @@ const I18N = {
     msg_extract_done: (n) => `Extracted! Added ${n} lines to the input. Review, then click "Parse & Translate".`,
     msg_extract_ok: (n) => `Extracted ${n} club lines. Please review/edit them in the input field.`,
     msg_extract_cancelled: "Image extraction cancelled.",
+    msg_extract_needs_gemini: "Image extraction needs a Gemini API key. Please fill in the Gemini API key field.",
     msg_img_pasted: "Image pasted. Click \"Extract from images\".",
     msg_extracterr: (e) => `Image extraction error: ${e}`,
     msg_savedict: (n) => `Saved ${n} words to your dictionary. They'll auto-fill next time.`,
@@ -1796,24 +1821,67 @@ function updateDictCount() {
 }
 
 // APIキー保存
+function getProvider() {
+  return document.getElementById('provider-select')?.value || 'gemini';
+}
+
+// 現在のプロバイダ用のキーを取得（入力欄優先、無ければ保存値）
 function getApiKey() {
-  const v = document.getElementById('api-key').value.trim();
+  const isGroq = getProvider() === 'groq';
+  const el = document.getElementById(isGroq ? 'api-key-groq' : 'api-key-gemini');
+  const v = (el?.value || '').trim();
+  if (v) localStorage.setItem(isGroq ? 'fm_api_key_groq' : 'fm_api_key', v);
+  return v || localStorage.getItem(isGroq ? 'fm_api_key_groq' : 'fm_api_key') || '';
+}
+
+// Geminiキーを取得（画像抽出用。プロバイダに関係なく使う）
+function getGeminiKey() {
+  const v = (document.getElementById('api-key-gemini')?.value || '').trim();
   if (v) localStorage.setItem('fm_api_key', v);
   return v || localStorage.getItem('fm_api_key') || '';
 }
 
+// プロバイダ切替時：モデル選択肢だけ切り替える（キー欄は両方常時表示）
+function onProviderChange() {
+  const isGroq = getProvider() === 'groq';
+  localStorage.setItem('fm_provider', isGroq ? 'groq' : 'gemini');
+  document.getElementById('optgroup-gemini').style.display = isGroq ? 'none' : '';
+  document.getElementById('optgroup-groq').style.display = isGroq ? '' : 'none';
+  const sel = document.getElementById('model-select');
+  const savedModel = localStorage.getItem(isGroq ? 'fm_model_groq' : 'fm_model_gemini');
+  const group = document.getElementById(isGroq ? 'optgroup-groq' : 'optgroup-gemini');
+  const opts = [...group.querySelectorAll('option')];
+  if (savedModel && opts.some(o => o.value === savedModel)) sel.value = savedModel;
+  else if (opts[0]) sel.value = opts[0].value;
+}
+
 window.addEventListener('DOMContentLoaded', () => {
-  const saved = localStorage.getItem('fm_api_key');
-  if (saved) document.getElementById('api-key').value = saved;
   updateErrLogBtn();
   restoreSession();
-  const savedModel = localStorage.getItem('fm_model');
-  if (savedModel) {
-    const sel = document.getElementById('model-select');
-    if ([...sel.options].some(o => o.value === savedModel)) sel.value = savedModel;
+  // 2つのキー欄を復元
+  const gKey = localStorage.getItem('fm_api_key');
+  const qKey = localStorage.getItem('fm_api_key_groq');
+  if (gKey) document.getElementById('api-key-gemini').value = gKey;
+  if (qKey) document.getElementById('api-key-groq').value = qKey;
+  // 入力のたびに保存
+  document.getElementById('api-key-gemini').addEventListener('input', e => {
+    const v = e.target.value.trim();
+    if (v) localStorage.setItem('fm_api_key', v);
+  });
+  document.getElementById('api-key-groq').addEventListener('input', e => {
+    const v = e.target.value.trim();
+    if (v) localStorage.setItem('fm_api_key_groq', v);
+  });
+  // プロバイダ復元
+  const savedProvider = localStorage.getItem('fm_provider');
+  if (savedProvider) {
+    const ps = document.getElementById('provider-select');
+    if ([...ps.options].some(o => o.value === savedProvider)) ps.value = savedProvider;
   }
+  onProviderChange();
   document.getElementById('model-select').addEventListener('change', e => {
-    localStorage.setItem('fm_model', e.target.value);
+    const k = getProvider() === 'groq' ? 'fm_model_groq' : 'fm_model_gemini';
+    localStorage.setItem(k, e.target.value);
   });
   const savedGap = localStorage.getItem('fm_rate_gap');
   if (savedGap) {
@@ -1823,15 +1891,14 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('rate-gap').addEventListener('change', e => {
     localStorage.setItem('fm_rate_gap', e.target.value);
   });
-  // 初期言語を適用
   const langSel = document.getElementById('lang-select');
   if (langSel) langSel.value = LANG;
   setLang(LANG);
   updateDictCount();
 });
 
-function toggleApiVis() {
-  const el = document.getElementById('api-key');
+function toggleApiVis(id) {
+  const el = document.getElementById(id || 'api-key-gemini');
   el.type = el.type === 'password' ? 'text' : 'password';
 }
 
@@ -1990,11 +2057,13 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// Geminiで画像からクラブ名+IDを抽出
+// 画像からクラブ名+IDを抽出（Gemini専用：Groqはこの用途のvision形式が異なるため）
 async function extractFromImages() {
   if (!loadedImages.length) { showAlert('error', t('msg_no_img')); return; }
-  const apiKey = getApiKey();
-  if (!apiKey) { showAlert('error', t('msg_need_key')); return; }
+
+  // 画像抽出は Gemini のみ対応。プロバイダに関わらず Gemini キーを使う。
+  const apiKey = getGeminiKey();
+  if (!apiKey) { showAlert('error', t('msg_extract_needs_gemini')); return; }
 
   clearAlert();
   cancelRequested = false;
@@ -2011,7 +2080,9 @@ async function extractFromImages() {
 - クラブ名は画像に表示されている原語（英語/現地語）のまま、変換せずに出力してください。`;
 
   try {
-    const model = document.getElementById('model-select')?.value || 'gemini-2.5-flash';
+    // 抽出は Gemini の vision 対応モデルを使う（Groqモデルが選ばれていても固定）
+    const sel = document.getElementById('model-select')?.value || '';
+    const model = sel.startsWith('gemini-') ? sel : 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const parts = [{ text: extractPrompt }];
@@ -2074,93 +2145,39 @@ async function extractFromImages() {
 }
 
 // ============================
-// Gemini API 呼び出し
+// API 呼び出し（プロバイダ共通）
 // ============================
-async function translateWithGemini(phrase, apiKey) {
-  const model = document.getElementById('model-select')?.value || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const systemPrompt = `あなたはフットボールデータベースの翻訳専門家です。ヨーロッパのクラブ名を自然な日本語カタカナに音訳してください。
-ルール:
-- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳しないでください。出力から省略してください。
-- 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
-- 複数の単語は半角スペース1つで区切ってください（例: "Wanze Bas Oha" → "ワンズ バゾハ"）。
-- 散文、考察、フォーマットは一切出力しないでください。翻訳されたカタカナのみを出力してください。`;
 
-  const body = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: `${systemPrompt}\n\n翻訳してください: ${phrase}` }]
-      }
-    ]
-  };
+// テキストプロンプトを送り、本文テキストを返す。Gemini / Groq を切り替え。
+// リトライ・バックオフ・中断は共通で処理する。
+async function callTextModel(promptText, apiKey) {
+  const provider = getProvider();
+  const model = document.getElementById('model-select')?.value
+    || (provider === 'groq' ? 'llama-3.3-70b-versatile' : 'gemini-2.5-flash');
+
+  let url, headers, body, extractText;
+  if (provider === 'groq') {
+    url = 'https://api.groq.com/openai/v1/chat/completions';
+    headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
+    body = { model, messages: [{ role: 'user', content: promptText }] };
+    extractText = data => data.choices?.[0]?.message?.content?.trim();
+  } else {
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    headers = { 'Content-Type': 'application/json' };
+    body = { contents: [{ role: 'user', parts: [{ text: promptText }] }] };
+    extractText = data => data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  }
 
   const maxRetries = 4;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (cancelRequested) throw new Error('CANCELLED');
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
     if (res.ok) {
       const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!text) throw new Error('Gemini から空のレスポンスが返されました');
+      const text = extractText(data);
+      if (!text) throw new Error('APIから空のレスポンスが返されました');
       return text;
     }
-
-    const err = await res.json().catch(() => ({}));
-    const msg = err.error?.message || `HTTP ${res.status}`;
-
-    // レート制限・サーバー混雑など一時的エラーなら待ってリトライ
-    if (isRetryableError(res.status, msg) && attempt < maxRetries) {
-      const waitMs = backoffDelay(res.status, msg, attempt);
-      setStatus('active', t('msg_retrying', Math.ceil(waitMs/1000), attempt + 1, maxRetries));
-      await sleep(waitMs);
-      if (cancelRequested) throw new Error('CANCELLED');
-      continue;
-    }
-
-    throw new Error(msg);
-  }
-  throw new Error('リトライ上限に達しました（一時的エラー）');
-}
-
-// 複数クラブ名を1リクエストでまとめて翻訳し、{番号: カタカナ} を返す。
-// items: [{ i, phrase }]（i は呼び出し側が振る通し番号）
-async function translateBatch(items, apiKey) {
-  const model = document.getElementById('model-select')?.value || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-  const listText = items.map(it => `${it.i}: ${it.phrase}`).join('\n');
-  const systemPrompt = `あなたはフットボールデータベースの翻訳専門家です。入力の各行「番号: クラブ名」について、クラブ名を自然な日本語カタカナに音訳してください。
-ルール:
-- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳せず出力から省略してください。
-- 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
-- 複数の単語は半角スペース1つで区切ってください。
-- 出力は必ず JSON オブジェクトのみ。キーは入力の番号（文字列）、値はカタカナ名。散文・説明・コードフェンスは一切付けないでください。`;
-
-  const body = {
-    contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\n翻訳対象:\n${listText}` }] }]
-  };
-
-  const maxRetries = 4;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (cancelRequested) throw new Error('CANCELLED');
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!text) throw new Error('Gemini から空のレスポンスが返されました');
-      return parseBatchJson(text);
-    }
-
     const err = await res.json().catch(() => ({}));
     const msg = err.error?.message || `HTTP ${res.status}`;
     if (isRetryableError(res.status, msg) && attempt < maxRetries) {
@@ -2173,6 +2190,33 @@ async function translateBatch(items, apiKey) {
     throw new Error(msg);
   }
   throw new Error('リトライ上限に達しました（一時的エラー）');
+}
+
+// ============================
+// Gemini API 呼び出し
+// ============================
+async function translateWithGemini(phrase, apiKey) {
+  const systemPrompt = `あなたはフットボールデータベースの翻訳専門家です。ヨーロッパのクラブ名を自然な日本語カタカナに音訳してください。
+ルール:
+- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳しないでください。出力から省略してください。
+- 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
+- 複数の単語は半角スペース1つで区切ってください（例: "Wanze Bas Oha" → "ワンズ バゾハ"）。
+- 散文、考察、フォーマットは一切出力しないでください。翻訳されたカタカナのみを出力してください。`;
+  return callTextModel(`${systemPrompt}\n\n翻訳してください: ${phrase}`, apiKey);
+}
+
+// 複数クラブ名を1リクエストでまとめて翻訳し、{番号: カタカナ} を返す。
+// items: [{ i, phrase }]（i は呼び出し側が振る通し番号）
+async function translateBatch(items, apiKey) {
+  const listText = items.map(it => `${it.i}: ${it.phrase}`).join('\n');
+  const systemPrompt = `あなたはフットボールデータベースの翻訳専門家です。入力の各行「番号: クラブ名」について、クラブ名を自然な日本語カタカナに音訳してください。
+ルール:
+- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳せず出力から省略してください。
+- 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
+- 複数の単語は半角スペース1つで区切ってください。
+- 出力は必ず JSON オブジェクトのみ。キーは入力の番号（文字列）、値はカタカナ名。散文・説明・コードフェンスは一切付けないでください。`;
+  const text = await callTextModel(`${systemPrompt}\n\n翻訳対象:\n${listText}`, apiKey);
+  return parseBatchJson(text);
 }
 
 // バッチ応答(JSON)を { 番号: カタカナ } のオブジェクトに変換
