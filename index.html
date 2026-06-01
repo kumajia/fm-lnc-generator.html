@@ -898,6 +898,10 @@
     </div>
   </div>
 
+  <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
+    FMlncGen <span id="app-version">v1.1.1</span>
+  </div>
+
 </div>
 
 <script>
@@ -960,6 +964,7 @@ const I18N = {
     batch_1: "1件ずつ（まとめない）",
     hint_batch: "※ まとめて翻訳するとAPI呼び出し回数が減り、無料枠制限に当たりにくくなります。取りこぼしは自動で個別再翻訳します。",
     msg_ratelimit: (s,a,m) => `レート制限中… ${s}秒待機してリトライ (${a}/${m})`,
+    msg_retrying: (s,a,m) => `混雑/制限のため ${s}秒待機してリトライ (${a}/${m})`,
     msg_done: (t,d,a,u) => `完了！ ${t} 件処理。辞書:${d} / AI:${a} / ユーザー:${u}`,
     msg_transfail: "⚠ 翻訳失敗",
     msg_transerr: (p,e) => `翻訳エラー (${p}): ${e}`,
@@ -1058,6 +1063,7 @@ const I18N = {
     batch_1: "1 at a time (no batching)",
     hint_batch: "Batching reduces API calls and helps avoid free-tier limits. Any misses are auto-retried individually.",
     msg_ratelimit: (s,a,m) => `Rate limited… waiting ${s}s then retrying (${a}/${m})`,
+    msg_retrying: (s,a,m) => `Busy/limited… waiting ${s}s then retrying (${a}/${m})`,
     msg_done: (t,d,a,u) => `Done! Processed ${t}. Dict:${d} / AI:${a} / User:${u}`,
     msg_transfail: "⚠ Translation failed",
     msg_transerr: (p,e) => `Translation error (${p}): ${e}`,
@@ -2034,12 +2040,10 @@ async function extractFromImages() {
       const err = await res.json().catch(() => ({}));
       const msg = err.error?.message || `HTTP ${res.status}`;
 
-      // 429（レート制限）なら待ってリトライ
-      if (res.status === 429 && attempt < maxRetries) {
-        const m = msg.match(/retry in ([\d.]+)s/i);
-        let waitMs = m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : (attempt + 1) * 4000;
-        if (waitMs > 60000) waitMs = 60000;
-        setStatus('active', t('msg_ratelimit', Math.ceil(waitMs/1000), attempt + 1, maxRetries));
+      // レート制限・サーバー混雑など一時的エラーなら待ってリトライ
+      if (isRetryableError(res.status, msg) && attempt < maxRetries) {
+        const waitMs = backoffDelay(res.status, msg, attempt);
+        setStatus('active', t('msg_retrying', Math.ceil(waitMs/1000), attempt + 1, maxRetries));
         await sleep(waitMs);
         if (cancelRequested) throw new Error('CANCELLED');
         continue;
@@ -2110,13 +2114,10 @@ async function translateWithGemini(phrase, apiKey) {
     const err = await res.json().catch(() => ({}));
     const msg = err.error?.message || `HTTP ${res.status}`;
 
-    // 429（レート制限）なら待ってリトライ
-    if (res.status === 429 && attempt < maxRetries) {
-      // エラーメッセージから "retry in X.Xs" を読み取る。無ければ指数バックオフ
-      const m = msg.match(/retry in ([\d.]+)s/i);
-      let waitMs = m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : (attempt + 1) * 4000;
-      if (waitMs > 60000) waitMs = 60000;
-      setStatus('active', t('msg_ratelimit', Math.ceil(waitMs/1000), attempt + 1, maxRetries));
+    // レート制限・サーバー混雑など一時的エラーなら待ってリトライ
+    if (isRetryableError(res.status, msg) && attempt < maxRetries) {
+      const waitMs = backoffDelay(res.status, msg, attempt);
+      setStatus('active', t('msg_retrying', Math.ceil(waitMs/1000), attempt + 1, maxRetries));
       await sleep(waitMs);
       if (cancelRequested) throw new Error('CANCELLED');
       continue;
@@ -2124,7 +2125,7 @@ async function translateWithGemini(phrase, apiKey) {
 
     throw new Error(msg);
   }
-  throw new Error('リトライ上限に達しました（レート制限）');
+  throw new Error('リトライ上限に達しました（一時的エラー）');
 }
 
 // 複数クラブ名を1リクエストでまとめて翻訳し、{番号: カタカナ} を返す。
@@ -2162,19 +2163,16 @@ async function translateBatch(items, apiKey) {
 
     const err = await res.json().catch(() => ({}));
     const msg = err.error?.message || `HTTP ${res.status}`;
-    if (res.status === 429 && attempt < maxRetries) {
-      const m = msg.match(/retry in ([\d.]+)s/i);
-      // retry in が無い場合は指数バックオフ（10s,20s,40s…、上限60s）
-      let waitMs = m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : Math.pow(2, attempt) * 10000;
-      if (waitMs > 60000) waitMs = 60000;
-      setStatus('active', t('msg_ratelimit', Math.ceil(waitMs / 1000), attempt + 1, maxRetries));
+    if (isRetryableError(res.status, msg) && attempt < maxRetries) {
+      const waitMs = backoffDelay(res.status, msg, attempt);
+      setStatus('active', t('msg_retrying', Math.ceil(waitMs / 1000), attempt + 1, maxRetries));
       await sleep(waitMs);
       if (cancelRequested) throw new Error('CANCELLED');
       continue;
     }
     throw new Error(msg);
   }
-  throw new Error('リトライ上限に達しました（レート制限）');
+  throw new Error('リトライ上限に達しました（一時的エラー）');
 }
 
 // バッチ応答(JSON)を { 番号: カタカナ } のオブジェクトに変換
@@ -2391,6 +2389,25 @@ function sleep(ms) {
     };
     tick();
   });
+}
+
+// このHTTPステータス/メッセージは「待てば直る一時的エラー」か？
+// 429（レート制限）に加え、500/503 やサーバー混雑（high demand / overloaded / unavailable）も対象。
+function isRetryableError(status, msg) {
+  if (status === 429 || status === 500 || status === 503) return true;
+  const m = String(msg || '').toLowerCase();
+  return m.includes('high demand') || m.includes('overload') ||
+         m.includes('unavailable') || m.includes('try again');
+}
+
+// リトライ時の待機ミリ秒を決める。429で "retry in Xs" があればそれを優先、
+// 無ければ指数バックオフ（10s,20s,40s…、上限60s）。
+function backoffDelay(status, msg, attempt) {
+  const m = String(msg || '').match(/retry in ([\d.]+)s/i);
+  let waitMs = m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : Math.pow(2, attempt) * 10000;
+  if (waitMs > 60000) waitMs = 60000;
+  if (waitMs < 4000) waitMs = 4000;
+  return waitMs;
 }
 
 // ============================
