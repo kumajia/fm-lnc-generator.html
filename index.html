@@ -922,7 +922,7 @@
   </div>
 
   <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
-    FMlncGen <span id="app-version">v1.2.1</span>
+    FMlncGen <span id="app-version">v1.2.2</span>
   </div>
 
 </div>
@@ -994,6 +994,7 @@ const I18N = {
     dict_count: (n) => n ? `（現在 ${n} 件）` : "（空）",
     msg_no_img: "画像が読み込まれていません。",
     msg_img_analyzing: (n) => `画像を解析中... (${n} 枚)`,
+    msg_img_chunk: (a,b) => `画像を解析中... (${a}/${b} グループ)`,
     msg_extract_done: (n) => `抽出完了！ ${n} 行を入力欄に追加しました。内容を確認して「解析して翻訳開始」へ。`,
     msg_extract_ok: (n) => `${n} 行のクラブデータを抽出しました。入力欄で内容を確認・修正してください。`,
     msg_extract_cancelled: "画像の抽出を中断しました。",
@@ -1094,6 +1095,7 @@ const I18N = {
     dict_count: (n) => n ? `(${n} entries)` : "(empty)",
     msg_no_img: "No image loaded.",
     msg_img_analyzing: (n) => `Analyzing images... (${n})`,
+    msg_img_chunk: (a,b) => `Analyzing images... (group ${a}/${b})`,
     msg_extract_done: (n) => `Extracted! Added ${n} lines to the input. Review, then click "Parse & Translate".`,
     msg_extract_ok: (n) => `Extracted ${n} club lines. Please review/edit them in the input field.`,
     msg_extract_cancelled: "Image extraction cancelled.",
@@ -2151,9 +2153,33 @@ async function callTextModel(promptText, apiKey) {
   throw new Error('リトライ上限に達しました（一時的エラー）');
 }
 
-// プロンプト＋画像（複数可）を送り、本文テキストを返す。Gemini / Groq を切り替え。
-// images: [{ mimeType, base64 }]
+// プロンプト＋画像を送り本文テキストを返す。画像枚数の上限を超える場合は分割して複数回呼び、結果を結合する。
 async function callVisionModel(promptText, images, apiKey) {
+  const provider = getProvider();
+  // 1リクエストの画像上限（Groqのvisionは5枚まで。Geminiは余裕をもって8枚ずつに）
+  const perCall = provider === 'groq' ? 5 : 8;
+
+  if (images.length <= perCall) {
+    return callVisionModelOnce(promptText, images, apiKey);
+  }
+
+  // 上限超え → 分割して順に処理し、テキストを結合
+  const chunks = [];
+  for (let i = 0; i < images.length; i += perCall) chunks.push(images.slice(i, i + perCall));
+  const results = [];
+  for (let ci = 0; ci < chunks.length; ci++) {
+    if (cancelRequested) throw new Error('CANCELLED');
+    setStatus('active', t('msg_img_chunk', ci + 1, chunks.length));
+    const part = await callVisionModelOnce(promptText, chunks[ci], apiKey);
+    if (part) results.push(part);
+    if (ci < chunks.length - 1 && !cancelRequested) await sleep(1500);
+  }
+  return results.join('\n');
+}
+
+// 1リクエスト分だけ送る（画像は呼び出し側で上限以内に分割済みの前提）
+// images: [{ mimeType, base64 }]
+async function callVisionModelOnce(promptText, images, apiKey) {
   const provider = getProvider();
   let url, headers, body, extractText;
 
@@ -2213,6 +2239,8 @@ async function translateWithGemini(phrase, apiKey) {
 ルール:
 - FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳しないでください。出力から省略してください。
 - 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
+- 綴りから言語圏を推測し、その地域の発音に近いカタカナにしてください（例: オランダ語圏なら「スポルト」、フランス語圏なら「スポール」）。確信が持てない場合は、最も一般的なカタカナ表記を選んでください。
+- 同じ綴りには常に同じカタカナを当て、表記を揺らさないでください。
 - 複数の単語は半角スペース1つで区切ってください（例: "Wanze Bas Oha" → "ワンズ バゾハ"）。
 - 散文、考察、フォーマットは一切出力しないでください。翻訳されたカタカナのみを出力してください。`;
   return callTextModel(`${systemPrompt}\n\n翻訳してください: ${phrase}`, apiKey);
@@ -2226,6 +2254,8 @@ async function translateBatch(items, apiKey) {
 ルール:
 - FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳せず出力から省略してください。
 - 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
+- 綴りから言語圏を推測し、その地域の発音に近いカタカナにしてください（例: オランダ語圏なら「スポルト」、フランス語圏なら「スポール」）。確信が持てない場合は、最も一般的なカタカナ表記を選んでください。
+- 同じ綴りには常に同じカタカナを当て、表記を揺らさないでください。
 - 複数の単語は半角スペース1つで区切ってください。
 - 出力は必ず JSON オブジェクトのみ。キーは入力の番号（文字列）、値はカタカナ名。散文・説明・コードフェンスは一切付けないでください。`;
   const text = await callTextModel(`${systemPrompt}\n\n翻訳対象:\n${listText}`, apiKey);
