@@ -826,9 +826,18 @@
       </div>
 
       <div class="field-group">
-        <label class="field-label" data-i18n="label_clubdata">クラブデータ（1行1クラブ）</label>
+        <label class="field-label" data-i18n="label_target">対象</label>
+        <select id="target-select" onchange="onTargetChange()">
+          <option value="club" data-i18n="target_club">クラブ名</option>
+          <option value="comp" data-i18n="target_comp">大会名</option>
+        </select>
+        <div class="hint" data-i18n="hint_target">※ 出力するコードが切り替わります（クラブ → CLUB_…、大会 → COMP_…）。</div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label"><span id="data-label">クラブデータ（1行1クラブ）</span></label>
         <textarea id="raw-input" placeholder="KE wervik 539859&#10;pays vert ostiches ath 3200572&#10;SV wevelgem 12345&#10;FC london city 999001"></textarea>
-        <div class="hint" data-i18n="hint_clubdata">形式: [プレフィックス(任意)] [クラブ名] [ID数字] — スクショ抽出結果もここに入ります</div>
+        <div class="hint"><span id="data-hint">形式: [プレフィックス(任意)] [クラブ名] [ID数字] — スクショ抽出結果もここに入ります</span></div>
       </div>
 
       <div class="btn-row">
@@ -922,7 +931,7 @@
   </div>
 
   <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
-    FMlncGen <span id="app-version">v1.2.2</span>
+    FMlncGen <span id="app-version">v1.3.0</span>
   </div>
 
 </div>
@@ -952,6 +961,7 @@ const I18N = {
     drop_sub: "FMの画面スクショからクラブ名とIDをAIが自動抽出します（複数枚OK）",
     btn_extract: "画像からクラブ名とIDを抽出", btn_clearimg: "画像をクリア",
     label_clubdata: "クラブデータ（1行1クラブ）",
+    label_target: "対象", target_club: "クラブ名", target_comp: "大会名", hint_target: "※ 出力するコードが切り替わります（クラブ → CLUB_…、大会 → COMP_…）。", label_compdata: "大会データ（1行1大会）", hint_compdata: "形式: [大会名] [ID数字] — スクショ抽出結果もここに入ります",
     hint_clubdata: "形式: [プレフィックス(任意)] [クラブ名] [ID数字] — スクショ抽出結果もここに入ります",
     btn_run: "解析して翻訳開始", btn_clear: "クリア",
     status_idle: "待機中 — データを入力して「解析して翻訳開始」をクリック",
@@ -1057,6 +1067,7 @@ const I18N = {
     drop_sub: "AI auto-extracts club names and IDs from FM screenshots (multiple OK)",
     btn_extract: "Extract club names & IDs from images", btn_clearimg: "Clear images",
     label_clubdata: "Club data (one club per line)",
+    label_target: "Target", target_club: "Club names", target_comp: "Competition names", hint_target: "Switches the output code type (Club → CLUB_…, Competition → COMP_…).", label_compdata: "Competition data (one per line)", hint_compdata: "Format: [competition name] [ID] — screenshot extraction also lands here",
     hint_clubdata: "Format: [Prefix (optional)] [Club name] [ID number] — screenshot results land here too",
     btn_run: "Parse & Translate", btn_clear: "Clear",
     status_idle: "Idle — enter data and click \"Parse & Translate\"",
@@ -1827,6 +1838,29 @@ function getProvider() {
   return document.getElementById('provider-select')?.value || 'gemini';
 }
 
+// 対象（club / comp）
+function getTarget() {
+  return document.getElementById('target-select')?.value || 'club';
+}
+
+// 対象が変わったらラベル・ヒント・プレースホルダを切り替えて保存
+function onTargetChange() {
+  const isComp = getTarget() === 'comp';
+  localStorage.setItem('fm_target', isComp ? 'comp' : 'club');
+  const dl = document.getElementById('data-label');
+  const dh = document.getElementById('data-hint');
+  const ta = document.getElementById('raw-input');
+  if (isComp) {
+    if (dl) dl.textContent = t('label_compdata');
+    if (dh) dh.textContent = t('hint_compdata');
+    if (ta) ta.placeholder = 'Premier League 12&#10;La Liga 21'.replace(/&#10;/g, '\n');
+  } else {
+    if (dl) dl.textContent = t('label_clubdata');
+    if (dh) dh.textContent = t('hint_clubdata');
+    if (ta) ta.placeholder = 'KE wervik 539859\npays vert ostiches ath 3200572\nSV wevelgem 12345\nFC london city 999001';
+  }
+}
+
 // 現在のプロバイダ用のキーを取得（入力欄優先、無ければ保存値）
 function getApiKey() {
   const isGroq = getProvider() === 'groq';
@@ -1881,6 +1915,13 @@ window.addEventListener('DOMContentLoaded', () => {
     if ([...ps.options].some(o => o.value === savedProvider)) ps.value = savedProvider;
   }
   onProviderChange();
+  // 対象（クラブ/大会）復元
+  const savedTarget = localStorage.getItem('fm_target');
+  if (savedTarget) {
+    const ts = document.getElementById('target-select');
+    if (ts && [...ts.options].some(o => o.value === savedTarget)) ts.value = savedTarget;
+  }
+  onTargetChange();
   document.getElementById('model-select').addEventListener('change', e => {
     const k = getProvider() === 'groq' ? 'fm_model_groq' : 'fm_model_gemini';
     localStorage.setItem(k, e.target.value);
@@ -2071,14 +2112,15 @@ async function extractFromImages() {
   setExtracting(true);
   setStatus('active', t('msg_img_analyzing', loadedImages.length));
 
+  const noun = getTarget() === 'comp' ? '大会名' : 'クラブ名';
   const extractPrompt = `この画像はFootball Manager（サッカーゲーム）の画面のスクリーンショットです。
-画像に表示されているクラブ名と、それに対応するID番号（数字）を読み取ってください。
+画像に表示されている${noun}と、それに対応するID番号（数字）を読み取ってください。
 出力ルール:
-- 1クラブにつき1行で出力してください。
-- 形式は「クラブ名 ID番号」（クラブ名のあとに半角スペース、最後にID数字）。
-- ID番号が見当たらない場合はクラブ名だけを出力してください。
+- 1件につき1行で出力してください。
+- 形式は「${noun} ID番号」（${noun}のあとに半角スペース、最後にID数字）。
+- ID番号が見当たらない場合は${noun}だけを出力してください。
 - 説明文、見出し、番号付けは一切不要です。データ行のみを出力してください。
-- クラブ名は画像に表示されている原語（英語/現地語）のまま、変換せずに出力してください。`;
+- ${noun}は画像に表示されている原語（英語/現地語）のまま、変換せずに出力してください。`;
 
   try {
     const text = await callVisionModel(extractPrompt, loadedImages, apiKey);
@@ -2627,16 +2669,17 @@ function importLnc(event) {
   reader.onload = e => guardSync('importLnc', () => {
     const text = String(e.target.result || '');
     const lines = text.split(/\r?\n/);
-    const byId = {}; // id -> { long, short }
+    const byId = {}; // id -> { long, short, entity }
     const order = [];
-    const re = /^"CLUB_(LONG|SHORT)_NAME_CHANGE"\s+(\d+)\s+"(.*)"\s*$/;
+    const re = /^"(CLUB|COMP)_(LONG|SHORT)_NAME_CHANGE"\s+(\d+)\s+"(.*)"\s*$/;
     lines.forEach(line => {
       const s = line.trim();
       if (!s || s.startsWith(';')) return;
       const m = s.match(re);
       if (!m) return;
-      const kind = m[1], id = m[2], val = m[3];
-      if (!byId[id]) { byId[id] = { long: '', short: '' }; order.push(id); }
+      const ent = m[1].toLowerCase(), kind = m[2], id = m[3], val = m[4];
+      if (!byId[id]) { byId[id] = { long: '', short: '', entity: ent }; order.push(id); }
+      byId[id].entity = ent;
       if (kind === 'LONG') byId[id].long = val;
       else byId[id].short = val;
     });
@@ -2645,7 +2688,7 @@ function importLnc(event) {
       return;
     }
     tableData = order.map(id => {
-      const { long, short } = byId[id];
+      const { long, short, entity } = byId[id];
       const name = long || short || '';
       return {
         id,
@@ -2654,10 +2697,15 @@ function importLnc(event) {
         nameWords: name ? name.split(/\s+/) : [],
         translated: name,
         short: (short && short !== long) ? short : '',
+        entity,
         isNew: false,
         source: 'import'
       };
     });
+    // 読み込んだファイルが COMP 中心なら対象を大会に合わせる
+    const compCount = order.filter(id => byId[id].entity === 'comp').length;
+    const ts = document.getElementById('target-select');
+    if (ts) { ts.value = compCount > order.length / 2 ? 'comp' : 'club'; onTargetChange(); }
     document.getElementById('stat-total').textContent = tableData.length;
     document.getElementById('stat-dict').textContent = 0;
     document.getElementById('stat-ai').textContent = 0;
@@ -2779,6 +2827,7 @@ function _generateLnc() {
   lines.push('; Generated by FMlncGen');
   lines.push('');
 
+  const ent = getTarget() === 'comp' ? 'COMP' : 'CLUB';
   let dropped = 0;
   tableData.forEach(d => {
     const trans = sanitizeName(d.translated);
@@ -2788,8 +2837,10 @@ function _generateLnc() {
     const shortRaw = sanitizeName(d.short);
     const shortLabel = shortRaw ? shortRaw : longLabel;
     if (/["\r\n\t]/.test(`${d.translated || ''}${d.short || ''}${d.prefix || ''}`)) dropped++;
-    lines.push(`"CLUB_LONG_NAME_CHANGE" ${d.id} "${longLabel}"`);
-    lines.push(`"CLUB_SHORT_NAME_CHANGE" ${d.id} "${shortLabel}"`);
+    // 行に対象が記録されていればそれを優先（.lnc読み込み時など）、無ければ現在の対象
+    const e = d.entity === 'comp' ? 'COMP' : (d.entity === 'club' ? 'CLUB' : ent);
+    lines.push(`"${e}_LONG_NAME_CHANGE" ${d.id} "${longLabel}"`);
+    lines.push(`"${e}_SHORT_NAME_CHANGE" ${d.id} "${shortLabel}"`);
   });
 
   // 画面表示は LF（textarea が正規化するため）。保存・コピー時に CRLF へ変換する
