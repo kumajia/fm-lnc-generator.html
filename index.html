@@ -741,10 +741,10 @@
       <div class="field-group">
         <label class="field-label" data-i18n="label_provider">APIプロバイダ</label>
         <select id="provider-select" onchange="onProviderChange()">
-          <option value="gemini">Google Gemini（画像抽出も対応）</option>
-          <option value="groq">Groq（高速・制限ゆるめ／翻訳のみ）</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="groq">Groq（高速・制限ゆるめ）</option>
         </select>
-        <div class="hint" data-i18n="hint_provider">※ Groq は速くて無料枠が広めですが、画像抽出（スクショ読み取り）は Gemini のみ対応です。</div>
+        <div class="hint" data-i18n="hint_provider">※ 翻訳・画像抽出とも Gemini / Groq の両方で使えます。Groq は速くて無料枠が広め。ただし画像（スクショ）からの読み取り精度は Gemini の方が無難です。</div>
       </div>
 
       <div class="field-group">
@@ -762,7 +762,7 @@
           <input type="password" id="api-key-groq" placeholder="gsk_..." autocomplete="off">
           <button class="toggle-vis" onclick="toggleApiVis('api-key-groq')" title="表示/非表示">👁</button>
         </div>
-        <div class="hint">※ console.groq.com で無料取得（クレカ不要）。プロバイダで Groq を選んだときに使います。</div>
+        <div class="hint">※ console.groq.com で無料取得（クレカ不要）。プロバイダで Groq を選んだときに、翻訳・画像抽出の両方で使われます。</div>
       </div>
 
       <div class="field-group">
@@ -922,7 +922,7 @@
   </div>
 
   <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
-    FMlncGen <span id="app-version">v1.2.0</span>
+    FMlncGen <span id="app-version">v1.2.1</span>
   </div>
 
 </div>
@@ -2057,13 +2057,12 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// 画像からクラブ名+IDを抽出（Gemini専用：Groqはこの用途のvision形式が異なるため）
+// 画像からクラブ名+IDを抽出（翻訳と同じプロバイダを使用）
 async function extractFromImages() {
   if (!loadedImages.length) { showAlert('error', t('msg_no_img')); return; }
 
-  // 画像抽出は Gemini のみ対応。プロバイダに関わらず Gemini キーを使う。
-  const apiKey = getGeminiKey();
-  if (!apiKey) { showAlert('error', t('msg_extract_needs_gemini')); return; }
+  const apiKey = getApiKey();
+  if (!apiKey) { showAlert('error', t('msg_need_key')); return; }
 
   clearAlert();
   cancelRequested = false;
@@ -2080,47 +2079,7 @@ async function extractFromImages() {
 - クラブ名は画像に表示されている原語（英語/現地語）のまま、変換せずに出力してください。`;
 
   try {
-    // 抽出は Gemini の vision 対応モデルを使う（Groqモデルが選ばれていても固定）
-    const sel = document.getElementById('model-select')?.value || '';
-    const model = sel.startsWith('gemini-') ? sel : 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-    const parts = [{ text: extractPrompt }];
-    loadedImages.forEach(img => {
-      parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
-    });
-    const reqBody = JSON.stringify({ contents: [{ role: 'user', parts }] });
-
-    const maxRetries = 4;
-    let text = null;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      if (cancelRequested) throw new Error('CANCELLED');
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: reqBody
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        text = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (!text) throw new Error('画像から有効なデータを抽出できませんでした');
-        break;
-      }
-
-      const err = await res.json().catch(() => ({}));
-      const msg = err.error?.message || `HTTP ${res.status}`;
-
-      // レート制限・サーバー混雑など一時的エラーなら待ってリトライ
-      if (isRetryableError(res.status, msg) && attempt < maxRetries) {
-        const waitMs = backoffDelay(res.status, msg, attempt);
-        setStatus('active', t('msg_retrying', Math.ceil(waitMs/1000), attempt + 1, maxRetries));
-        await sleep(waitMs);
-        if (cancelRequested) throw new Error('CANCELLED');
-        continue;
-      }
-      throw new Error(msg);
-    }
+    const text = await callVisionModel(extractPrompt, loadedImages, apiKey);
 
     // 既存のテキストエリアに追記
     const ta = document.getElementById('raw-input');
@@ -2192,8 +2151,62 @@ async function callTextModel(promptText, apiKey) {
   throw new Error('リトライ上限に達しました（一時的エラー）');
 }
 
+// プロンプト＋画像（複数可）を送り、本文テキストを返す。Gemini / Groq を切り替え。
+// images: [{ mimeType, base64 }]
+async function callVisionModel(promptText, images, apiKey) {
+  const provider = getProvider();
+  let url, headers, body, extractText;
+
+  if (provider === 'groq') {
+    // Groq は OpenAI 互換。vision 対応モデルを固定で使う。
+    const model = 'meta-llama/llama-4-scout-17b-16e-instruct';
+    url = 'https://api.groq.com/openai/v1/chat/completions';
+    headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` };
+    const content = [{ type: 'text', text: promptText }];
+    images.forEach(img => content.push({
+      type: 'image_url',
+      image_url: { url: `data:${img.mimeType};base64,${img.base64}` }
+    }));
+    body = { model, messages: [{ role: 'user', content }] };
+    extractText = data => data.choices?.[0]?.message?.content?.trim();
+  } else {
+    // Gemini：選択中のモデルが gemini- なら流用、そうでなければ既定の vision モデル
+    const sel = document.getElementById('model-select')?.value || '';
+    const model = sel.startsWith('gemini-') ? sel : 'gemini-2.5-flash';
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    headers = { 'Content-Type': 'application/json' };
+    const parts = [{ text: promptText }];
+    images.forEach(img => parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } }));
+    body = { contents: [{ role: 'user', parts }] };
+    extractText = data => data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  }
+
+  const maxRetries = 4;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (cancelRequested) throw new Error('CANCELLED');
+    const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+    if (res.ok) {
+      const data = await res.json();
+      const text = extractText(data);
+      if (!text) throw new Error('画像から有効なデータを抽出できませんでした');
+      return text;
+    }
+    const err = await res.json().catch(() => ({}));
+    const msg = err.error?.message || `HTTP ${res.status}`;
+    if (isRetryableError(res.status, msg) && attempt < maxRetries) {
+      const waitMs = backoffDelay(res.status, msg, attempt);
+      setStatus('active', t('msg_retrying', Math.ceil(waitMs / 1000), attempt + 1, maxRetries));
+      await sleep(waitMs);
+      if (cancelRequested) throw new Error('CANCELLED');
+      continue;
+    }
+    throw new Error(msg);
+  }
+  throw new Error('リトライ上限に達しました（一時的エラー）');
+}
+
 // ============================
-// Gemini API 呼び出し
+// 翻訳呼び出し
 // ============================
 async function translateWithGemini(phrase, apiKey) {
   const systemPrompt = `あなたはフットボールデータベースの翻訳専門家です。ヨーロッパのクラブ名を自然な日本語カタカナに音訳してください。
