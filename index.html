@@ -830,6 +830,8 @@
         <select id="target-select" onchange="onTargetChange()">
           <option value="club" data-i18n="target_club">クラブ名</option>
           <option value="comp" data-i18n="target_comp">大会名</option>
+          <option value="player" data-i18n="target_player">選手名</option>
+          <option value="stadium" data-i18n="target_stadium">スタジアム名</option>
         </select>
         <div class="hint" data-i18n="hint_target">※ 出力するコードが切り替わります（クラブ → CLUB_…、大会 → COMP_…）。</div>
       </div>
@@ -931,7 +933,7 @@
   </div>
 
   <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
-    FMlncGen <span id="app-version">v1.3.0</span>
+    FMlncGen <span id="app-version">v1.4.0</span>
   </div>
 
 </div>
@@ -961,7 +963,7 @@ const I18N = {
     drop_sub: "FMの画面スクショからクラブ名とIDをAIが自動抽出します（複数枚OK）",
     btn_extract: "画像からクラブ名とIDを抽出", btn_clearimg: "画像をクリア",
     label_clubdata: "クラブデータ（1行1クラブ）",
-    label_target: "対象", target_club: "クラブ名", target_comp: "大会名", hint_target: "※ 出力するコードが切り替わります（クラブ → CLUB_…、大会 → COMP_…）。", label_compdata: "大会データ（1行1大会）", hint_compdata: "形式: [大会名] [ID数字] — スクショ抽出結果もここに入ります",
+    label_target: "対象", target_club: "クラブ名", target_comp: "大会名", target_player: "選手名", target_stadium: "スタジアム名", hint_target: "※ 出力するコードが切り替わります（クラブ→CLUB_、大会→COMP_、選手→CHANGE_PLAYER_NAME、スタジアム→STADIUM_NAME_CHANGE）。", label_compdata: "大会データ（1行1大会）", hint_compdata: "形式: [大会名] [ID数字] — スクショ抽出結果もここに入ります", label_playerdata: "選手データ（1行1選手）", hint_playerdata: "形式: [選手名] [ID数字] — 名前はAIがカタカナに変換します", label_stadiumdata: "スタジアムデータ（1行1件）", hint_stadiumdata: "形式: [スタジアム名] [ID数字]",
     hint_clubdata: "形式: [プレフィックス(任意)] [クラブ名] [ID数字] — スクショ抽出結果もここに入ります",
     btn_run: "解析して翻訳開始", btn_clear: "クリア",
     status_idle: "待機中 — データを入力して「解析して翻訳開始」をクリック",
@@ -1067,7 +1069,7 @@ const I18N = {
     drop_sub: "AI auto-extracts club names and IDs from FM screenshots (multiple OK)",
     btn_extract: "Extract club names & IDs from images", btn_clearimg: "Clear images",
     label_clubdata: "Club data (one club per line)",
-    label_target: "Target", target_club: "Club names", target_comp: "Competition names", hint_target: "Switches the output code type (Club → CLUB_…, Competition → COMP_…).", label_compdata: "Competition data (one per line)", hint_compdata: "Format: [competition name] [ID] — screenshot extraction also lands here",
+    label_target: "Target", target_club: "Club names", target_comp: "Competition names", target_player: "Player names", target_stadium: "Stadium names", hint_target: "Switches the output code (Club→CLUB_, Competition→COMP_, Player→CHANGE_PLAYER_NAME, Stadium→STADIUM_NAME_CHANGE).", label_compdata: "Competition data (one per line)", hint_compdata: "Format: [competition name] [ID] — screenshot extraction also lands here", label_playerdata: "Player data (one per line)", hint_playerdata: "Format: [player name] [ID] — names are converted to katakana by AI", label_stadiumdata: "Stadium data (one per line)", hint_stadiumdata: "Format: [stadium name] [ID]",
     hint_clubdata: "Format: [Prefix (optional)] [Club name] [ID number] — screenshot results land here too",
     btn_run: "Parse & Translate", btn_clear: "Clear",
     status_idle: "Idle — enter data and click \"Parse & Translate\"",
@@ -1838,27 +1840,42 @@ function getProvider() {
   return document.getElementById('provider-select')?.value || 'gemini';
 }
 
-// 対象（club / comp）
+// 対象（club / comp / player / stadium）
 function getTarget() {
   return document.getElementById('target-select')?.value || 'club';
 }
 
-// 対象が変わったらラベル・ヒント・プレースホルダを切り替えて保存
+// 選手・スタジアムは SHORT を使わない（名前1つ）
+function targetHasShort() {
+  const tg = getTarget();
+  return tg === 'club' || tg === 'comp';
+}
+
+// 対象が変わったらラベル・ヒント・プレースホルダ・SHORT列表示を切り替えて保存
 function onTargetChange() {
-  const isComp = getTarget() === 'comp';
-  localStorage.setItem('fm_target', isComp ? 'comp' : 'club');
+  const tg = getTarget();
+  localStorage.setItem('fm_target', tg);
   const dl = document.getElementById('data-label');
   const dh = document.getElementById('data-hint');
   const ta = document.getElementById('raw-input');
-  if (isComp) {
-    if (dl) dl.textContent = t('label_compdata');
-    if (dh) dh.textContent = t('hint_compdata');
-    if (ta) ta.placeholder = 'Premier League 12&#10;La Liga 21'.replace(/&#10;/g, '\n');
-  } else {
-    if (dl) dl.textContent = t('label_clubdata');
-    if (dh) dh.textContent = t('hint_clubdata');
-    if (ta) ta.placeholder = 'KE wervik 539859\npays vert ostiches ath 3200572\nSV wevelgem 12345\nFC london city 999001';
-  }
+
+  const conf = {
+    club:    { label: t('label_clubdata'), hint: t('hint_clubdata'),
+               ph: 'KE wervik 539859\npays vert ostiches ath 3200572\nSV wevelgem 12345\nFC london city 999001' },
+    comp:    { label: t('label_compdata'), hint: t('hint_compdata'),
+               ph: 'Premier League 12\nLa Liga 21' },
+    player:  { label: t('label_playerdata'), hint: t('hint_playerdata'),
+               ph: 'Paolo Maldini 45\nEdgar Davids 54' },
+    stadium: { label: t('label_stadiumdata'), hint: t('hint_stadiumdata'),
+               ph: 'Celtic Park 102618\nMurrayfield Stadium 5209051' },
+  }[tg] || {};
+
+  if (dl) dl.textContent = conf.label || t('label_clubdata');
+  if (dh) dh.textContent = conf.hint || t('hint_clubdata');
+  if (ta) ta.placeholder = conf.ph || '';
+
+  // SHORT列の表示/非表示（テーブル再描画で反映）
+  if (typeof tableData !== 'undefined' && tableData.length) renderTable();
 }
 
 // 現在のプロバイダ用のキーを取得（入力欄優先、無ければ保存値）
@@ -2112,7 +2129,7 @@ async function extractFromImages() {
   setExtracting(true);
   setStatus('active', t('msg_img_analyzing', loadedImages.length));
 
-  const noun = getTarget() === 'comp' ? '大会名' : 'クラブ名';
+  const noun = { comp: '大会名', player: '選手名', stadium: 'スタジアム名' }[getTarget()] || 'クラブ名';
   const extractPrompt = `この画像はFootball Manager（サッカーゲーム）の画面のスクリーンショットです。
 画像に表示されている${noun}と、それに対応するID番号（数字）を読み取ってください。
 出力ルール:
@@ -2555,18 +2572,22 @@ function renderTable() {
   const needsAttention = d => !((d.translated || '').trim()) || d.error || d.translated === t('msg_transfail');
   const attnCount = tableData.filter(needsAttention).length;
 
+  const showShort = targetHasShort();
   let rows = tableData.map((d, i) => {
     if (filterAttention && !needsAttention(d)) return '';
     const isNew = d.isNew;
     const newTag = isNew ? `<span class="new-tag">${t('new_tag')}</span>` : '';
     const inputClass = isNew ? 'trans-input is-new' : 'trans-input';
     const errTitle = d.error ? `title="${d.error}"` : '';
+    const shortCell = showShort
+      ? `<td><input class="trans-input short-input" value="${escHtml(d.short || '')}" placeholder="${t('short_ph')}" data-idx="${i}" onchange="onShortEdit(this, ${i})" oninput="onShortEdit(this, ${i})"></td>`
+      : '';
     return `<tr>
       <td class="id-cell">${d.id}</td>
       <td class="prefix-cell">${d.prefix || '<span style="color:var(--text-muted)">—</span>'}</td>
       <td class="name-cell">${escHtml(d.originalName)}${newTag}</td>
       <td><input class="${inputClass}" ${errTitle} value="${escHtml(d.translated)}" data-idx="${i}" onchange="onTransEdit(this, ${i})" oninput="onTransEdit(this, ${i})"></td>
-      <td><input class="trans-input short-input" value="${escHtml(d.short || '')}" placeholder="${t('short_ph')}" data-idx="${i}" onchange="onShortEdit(this, ${i})" oninput="onShortEdit(this, ${i})"></td>
+      ${shortCell}
     </tr>`;
   }).join('');
 
@@ -2585,7 +2606,7 @@ function renderTable() {
             <th>${t('th_prefix')}</th>
             <th>${t('th_name')}</th>
             <th>${t('th_trans')}</th>
-            <th>${t('th_short')}</th>
+            ${showShort ? `<th>${t('th_short')}</th>` : ''}
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -2671,17 +2692,37 @@ function importLnc(event) {
     const lines = text.split(/\r?\n/);
     const byId = {}; // id -> { long, short, entity }
     const order = [];
-    const re = /^"(CLUB|COMP)_(LONG|SHORT)_NAME_CHANGE"\s+(\d+)\s+"(.*)"\s*$/;
+    const reClubComp = /^"(CLUB|COMP)_(LONG|SHORT)_NAME_CHANGE"\s+(\d+)\s+"(.*)"\s*$/;
+    const rePlayer = /^"CHANGE_PLAYER_NAME"\s+(\d+)\s+"([^"]*)"\s+"([^"]*)"(?:\s+"([^"]*)")?\s*$/;
+    const reStadium = /^"STADIUM_NAME_CHANGE"\s+(\d+)\s+"([^"]*)"/;
     lines.forEach(line => {
       const s = line.trim();
-      if (!s || s.startsWith(';')) return;
-      const m = s.match(re);
-      if (!m) return;
-      const ent = m[1].toLowerCase(), kind = m[2], id = m[3], val = m[4];
-      if (!byId[id]) { byId[id] = { long: '', short: '', entity: ent }; order.push(id); }
-      byId[id].entity = ent;
-      if (kind === 'LONG') byId[id].long = val;
-      else byId[id].short = val;
+      if (!s || s.startsWith(';') || s.startsWith('#')) return;
+
+      let m = s.match(reClubComp);
+      if (m) {
+        const ent = m[1].toLowerCase(), kind = m[2], id = m[3], val = m[4];
+        if (!byId[id]) { byId[id] = { long: '', short: '', entity: ent }; order.push(id); }
+        byId[id].entity = ent;
+        if (kind === 'LONG') byId[id].long = val; else byId[id].short = val;
+        return;
+      }
+      m = s.match(rePlayer);
+      if (m) {
+        const id = m[1];
+        // First(m[2]) Common(m[3]) Second(m[4]) のうち、表示名として Common を優先
+        const name = (m[3] && m[3].trim()) || [m[2], m[4]].filter(Boolean).join(' ').trim();
+        if (!byId[id]) { byId[id] = { long: name, short: '', entity: 'player' }; order.push(id); }
+        else { byId[id].long = name; byId[id].entity = 'player'; }
+        return;
+      }
+      m = s.match(reStadium);
+      if (m) {
+        const id = m[1], name = m[2];
+        if (!byId[id]) { byId[id] = { long: name, short: '', entity: 'stadium' }; order.push(id); }
+        else { byId[id].long = name; byId[id].entity = 'stadium'; }
+        return;
+      }
     });
     if (order.length === 0) {
       showAlert('error', t('msg_lnc_none'));
@@ -2702,10 +2743,12 @@ function importLnc(event) {
         source: 'import'
       };
     });
-    // 読み込んだファイルが COMP 中心なら対象を大会に合わせる
-    const compCount = order.filter(id => byId[id].entity === 'comp').length;
+    // 読み込んだファイルの多数派の種別に対象を合わせる
+    const counts = {};
+    order.forEach(id => { const e = byId[id].entity; counts[e] = (counts[e] || 0) + 1; });
+    const majority = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0] || 'club';
     const ts = document.getElementById('target-select');
-    if (ts) { ts.value = compCount > order.length / 2 ? 'comp' : 'club'; onTargetChange(); }
+    if (ts && [...ts.options].some(o => o.value === majority)) { ts.value = majority; onTargetChange(); }
     document.getElementById('stat-total').textContent = tableData.length;
     document.getElementById('stat-dict').textContent = 0;
     document.getElementById('stat-ai').textContent = 0;
@@ -2827,20 +2870,31 @@ function _generateLnc() {
   lines.push('; Generated by FMlncGen');
   lines.push('');
 
-  const ent = getTarget() === 'comp' ? 'COMP' : 'CLUB';
+  const target = getTarget();
   let dropped = 0;
   tableData.forEach(d => {
     const trans = sanitizeName(d.translated);
     if (!trans) return;
     const prefix = sanitizeName(d.prefix);
     const longLabel = prefix ? `${prefix} ${trans}` : trans;
-    const shortRaw = sanitizeName(d.short);
-    const shortLabel = shortRaw ? shortRaw : longLabel;
     if (/["\r\n\t]/.test(`${d.translated || ''}${d.short || ''}${d.prefix || ''}`)) dropped++;
-    // 行に対象が記録されていればそれを優先（.lnc読み込み時など）、無ければ現在の対象
-    const e = d.entity === 'comp' ? 'COMP' : (d.entity === 'club' ? 'CLUB' : ent);
-    lines.push(`"${e}_LONG_NAME_CHANGE" ${d.id} "${longLabel}"`);
-    lines.push(`"${e}_SHORT_NAME_CHANGE" ${d.id} "${shortLabel}"`);
+
+    // 行に種別が記録されていればそれを優先（.lnc読み込み時など）、無ければ現在の対象
+    const tEnt = d.entity || target;
+
+    if (tEnt === 'player') {
+      // 選手: First空・Commonにフルネーム
+      lines.push(`"CHANGE_PLAYER_NAME" ${d.id} "" "${longLabel}"`);
+    } else if (tEnt === 'stadium') {
+      lines.push(`"STADIUM_NAME_CHANGE" ${d.id} "${longLabel}"`);
+    } else {
+      // クラブ / 大会: LONG + SHORT
+      const e = tEnt === 'comp' ? 'COMP' : 'CLUB';
+      const shortRaw = sanitizeName(d.short);
+      const shortLabel = shortRaw ? shortRaw : longLabel;
+      lines.push(`"${e}_LONG_NAME_CHANGE" ${d.id} "${longLabel}"`);
+      lines.push(`"${e}_SHORT_NAME_CHANGE" ${d.id} "${shortLabel}"`);
+    }
   });
 
   // 画面表示は LF（textarea が正規化するため）。保存・コピー時に CRLF へ変換する
