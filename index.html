@@ -870,6 +870,9 @@
             ⬆ 辞書をインポート
           </button>
           <input type="file" id="dict-import-1" accept=".json,application/json" style="display:none;" onchange="importUserDict(event)">
+          <button class="btn btn-secondary" onclick="cleanupUserDict()" style="font-size:12px;" data-i18n="btn_dictcleanup">
+            🧹 カタカナだけの不要エントリを掃除
+          </button>
         </div>
         <div class="hint" data-i18n="hint_dictmgmt">辞書をJSONで保存・読み込みできます。別のPCへの移行や、仲間との共有・バックアップに使えます。</div>
       </div>
@@ -933,7 +936,7 @@
   </div>
 
   <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
-    FMlncGen <span id="app-version">v1.5.0</span>
+    FMlncGen <span id="app-version">v1.5.1</span>
   </div>
 
 </div>
@@ -981,6 +984,7 @@ const I18N = {
     // テーブルヘッダー
     th_id: "ID", th_prefix: "プレフィックス", th_name: "原語クラブ名", th_trans: "日本語翻訳（編集可）", th_short: "SHORT名（編集可）", short_ph: "空欄=LONGと同じ",
     btn_savedict: "💾 手動編集をユーザー辞書に保存", btn_resetdict: "🗑 ユーザー辞書をリセット",
+    btn_dictcleanup: "🧹 カタカナだけの不要エントリを掃除", msg_dictcleanup_empty: "辞書が空です。", msg_dictcleanup_none: "掃除対象（原語の無いカタカナだけのエントリ）はありませんでした。", msg_dictcleanup_confirm: (n) => `原語の無いカタカナだけのエントリを ${n} 件削除します。よろしいですか？`, msg_dictcleanup_done: (n,rest) => `${n} 件の不要エントリを削除しました（残り ${rest} 件）。`,
     new_tag: "NEW",
     // インストール
     install_text: "このツールをアプリとしてインストールできます。",
@@ -1014,6 +1018,7 @@ const I18N = {
     msg_img_pasted: "画像を貼り付けました。「画像から抽出」をクリックしてください。",
     msg_extracterr: (e) => `画像抽出エラー: ${e}`,
     msg_savedict: (n) => `${n} 件のワードをユーザー辞書に保存しました。次回は自動入力されます。`,
+    msg_savedict_skip: (n,sk) => `${n} 件を辞書に保存しました（原語が無い ${sk} 件は除外）。`,
     msg_confirm_resetdict: "ユーザー辞書をすべて削除しますか？",
     msg_resetdict: "ユーザー辞書をリセットしました。",
     msg_dict_empty: "ユーザー辞書が空です。先に単語を保存してください。",
@@ -1043,6 +1048,7 @@ const I18N = {
     btn_importlnc: ".lncを読み込み",
     btn_savealldict: "全件を辞書に追加",
     msg_savealldict: (n) => `${n} 件を辞書に追加しました。`,
+    msg_savealldict_skip: (n,sk) => `${n} 件を辞書に追加しました（原語が無い ${sk} 件は除外）。`,
     msg_restored: (n, mins) => `前回の作業を復元しました（${n} 件・約${mins}分前）。新しく始めるには「クリア」。`,
     msg_lnc_none: ".lnc から CLUB_LONG / SHORT の行が見つかりませんでした。",
     msg_lnc_loaded: (n) => `.lnc を読み込みました（${n} クラブ）。`,
@@ -1086,6 +1092,7 @@ const I18N = {
     output_info: "This field is editable. Edit before copying / saving.",
     th_id: "ID", th_prefix: "Prefix", th_name: "Original name", th_trans: "Translation (editable)", th_short: "Short name (editable)", short_ph: "blank = same as LONG",
     btn_savedict: "💾 Save edits to user dictionary", btn_resetdict: "🗑 Reset user dictionary",
+    btn_dictcleanup: "🧹 Clean up katakana-only entries", msg_dictcleanup_empty: "The dictionary is empty.", msg_dictcleanup_none: "No entries to clean up (no source-less katakana entries found).", msg_dictcleanup_confirm: (n) => `This will delete ${n} katakana-only entries that have no source term. Continue?`, msg_dictcleanup_done: (n,rest) => `Deleted ${n} unnecessary entries (${rest} remaining).`,
     new_tag: "NEW",
     install_text: "You can install this tool as an app.", install_btn: "Install",
     msg_need_data: "Please enter some data.",
@@ -1116,6 +1123,7 @@ const I18N = {
     msg_img_pasted: "Image pasted. Click \"Extract from images\".",
     msg_extracterr: (e) => `Image extraction error: ${e}`,
     msg_savedict: (n) => `Saved ${n} words to your dictionary. They'll auto-fill next time.`,
+    msg_savedict_skip: (n,sk) => `Saved ${n} words (skipped ${sk} with no source term).`,
     msg_confirm_resetdict: "Delete the entire user dictionary?",
     msg_resetdict: "User dictionary reset.",
     msg_dict_empty: "User dictionary is empty. Save some words first.",
@@ -1145,6 +1153,7 @@ const I18N = {
     btn_importlnc: "Load .lnc",
     btn_savealldict: "Add all to dictionary",
     msg_savealldict: (n) => `Added ${n} entries to the dictionary.`,
+    msg_savealldict_skip: (n,sk) => `Added ${n} entries (skipped ${sk} with no source term).`,
     msg_restored: (n, mins) => `Restored your previous work (${n} rows, ~${mins} min ago). Use "Clear" to start fresh.`,
     msg_lnc_none: "No CLUB_LONG / SHORT lines found in the .lnc file.",
     msg_lnc_loaded: (n) => `Loaded .lnc (${n} clubs).`,
@@ -2667,34 +2676,43 @@ function onShortEdit(input, idx) {
   scheduleSave();
 }
 
+// この行は辞書に登録すべきか？
+// .lnc読み込み由来で「原語＝訳（カタカナ→カタカナ）」の行は、原語が無いので登録しない
+function isDictRegisterable(d) {
+  const trans = (d.translated || '').trim();
+  if (!trans || trans === t('msg_transfail') || d.error) return false;
+  if (!d.originalName) return false;
+  // 原語と訳が同一（= .lnc由来でカタカナしか無い）の行は除外
+  if (d.source === 'import' && d.originalName.trim() === trans) return false;
+  return true;
+}
+
 function saveUserDictFromTable() {
   const userDict = getUserDict();
-  let count = 0;
+  let count = 0, skipped = 0;
   tableData.forEach(d => {
     if (d.edited && d.translated && d.nameWords) {
-      // 単語ごとに保存（完全フレーズも保存）
+      if (!isDictRegisterable(d)) { skipped++; return; }
       const key = d.originalName.toLowerCase();
       userDict[key] = d.translated;
       count++;
     }
   });
   saveUserDict(userDict);
-  showAlert('success', t('msg_savedict', count));
+  showAlert('success', skipped > 0 ? t('msg_savedict_skip', count, skipped) : t('msg_savedict', count));
 }
 
 // 確定済みの訳をまとめて辞書へ（編集の有無を問わず、有効な翻訳すべて）
 function saveAllToDict() {
   const userDict = getUserDict();
-  let count = 0;
+  let count = 0, skipped = 0;
   tableData.forEach(d => {
-    const trans = (d.translated || '').trim();
-    if (!trans || trans === t('msg_transfail') || d.error) return;
-    if (!d.originalName) return;
-    userDict[d.originalName.toLowerCase()] = trans;
+    if (!isDictRegisterable(d)) { if ((d.translated || '').trim()) skipped++; return; }
+    userDict[d.originalName.toLowerCase()] = (d.translated || '').trim();
     count++;
   });
   saveUserDict(userDict);
-  showAlert('success', t('msg_savealldict', count));
+  showAlert('success', skipped > 0 ? t('msg_savealldict_skip', count, skipped) : t('msg_savealldict', count));
 }
 
 // 既存の .lnc を読み込んでテーブルに展開（往復編集）
@@ -2794,6 +2812,28 @@ function clearUserDict() {
     updateDictCount();
     showAlert('success', t('msg_resetdict'));
   }
+}
+
+// キーがカタカナ（＝原語でない）の不要エントリを掃除する。
+// 原語キー（ラテン文字などを含む）は残し、キーがカナ/かな/CJKのみのものを削除。
+function cleanupUserDict() {
+  const userDict = getUserDict();
+  const keys = Object.keys(userDict);
+  if (keys.length === 0) { showAlert('warn', t('msg_dictcleanup_empty')); return; }
+
+  // 「原語らしさ」= ラテン文字（A-Z a-z）を含むキーは原語として残す。
+  // それを含まず、ひらがな/カタカナ/漢字だけのキーは「カタカナだけの無効エントリ」として削除候補。
+  const hasLatin = k => /[A-Za-z]/.test(k);
+  const isJpOnly = k => /^[\u3040-\u30ff\u3400-\u9fff\u30fc\s・･。、ー－\-]+$/.test(k);
+  const toDelete = keys.filter(k => !hasLatin(k) && isJpOnly(k));
+
+  if (toDelete.length === 0) { showAlert('success', t('msg_dictcleanup_none')); return; }
+  if (!confirm(t('msg_dictcleanup_confirm', toDelete.length))) return;
+
+  toDelete.forEach(k => { delete userDict[k]; });
+  saveUserDict(userDict);
+  updateDictCount();
+  showAlert('success', t('msg_dictcleanup_done', toDelete.length, Object.keys(userDict).length));
 }
 
 // ユーザー辞書をJSONでダウンロード
