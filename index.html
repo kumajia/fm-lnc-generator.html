@@ -936,7 +936,7 @@
   </div>
 
   <div style="text-align:center;margin-top:24px;padding:12px;color:var(--text-muted);font-size:11px;">
-    FMlncGen <span id="app-version">v1.5.1</span>
+    FMlncGen <span id="app-version">v1.5.2</span>
   </div>
 
 </div>
@@ -2318,7 +2318,7 @@ async function callVisionModelOnce(promptText, images, apiKey) {
 async function translateWithGemini(phrase, apiKey, country) {
   const systemPrompt = `あなたはフットボールデータベースの翻訳専門家です。ヨーロッパのクラブ名を自然な日本語カタカナに音訳してください。
 ルール:
-- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳しないでください。出力から省略してください。
+- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳せず、元のアルファベットのまま、元の位置（前か後ろか）を保って残してください（例: "London City FC" → "ロンドン シティ FC"、"FC Porto" → "FC ポルト"）。
 - 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
 - 綴りから言語圏を推測し、その地域の発音に近いカタカナにしてください（例: オランダ語圏なら「スポルト」、フランス語圏なら「スポール」）。確信が持てない場合は、最も一般的なカタカナ表記を選んでください。
 - 同じ綴りには常に同じカタカナを当て、表記を揺らさないでください。
@@ -2336,7 +2336,7 @@ async function translateBatch(items, apiKey) {
     : `${it.i}: ${it.phrase}`).join('\n');
   const systemPrompt = `あなたはフットボールデータベースの翻訳専門家です。入力の各行「番号: クラブ名」について、クラブ名を自然な日本語カタカナに音訳してください。
 ルール:
-- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳せず出力から省略してください。
+- FC、KVK、RES、VV、SV などのフットボール略語・頭字語は翻訳せず、元のアルファベットのまま、元の位置（前か後ろか）を保って残してください（例: "London City FC" → "ロンドン シティ FC"）。
 - 地名とチーム名詞のみを正確で標準的な日本語カタカナに変換してください。
 - 行に「（○○のクラブ）」と国名がある場合は、その国の言語の発音に合わせてください。無い場合は綴りから言語圏を推測してください（例: オランダ語圏なら「スポルト」、フランス語圏なら「スポール」）。確信が持てない場合は、最も一般的なカタカナ表記を選んでください。
 - 同じ綴りには常に同じカタカナを当て、表記を揺らさないでください。
